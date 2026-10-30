@@ -1,0 +1,45 @@
+name: Contract
+
+on:
+  push:
+    branches: [main]
+    paths: ["contract/**", ".github/workflows/contract.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: Unit tests
+        run: cargo test
+
+      - name: Install cargo-near
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/near/cargo-near/releases/latest/download/cargo-near-installer.sh | sh
+
+      - name: Build wasm
+        run: cargo near build non-reproducible-wasm
+
+      - name: Commit build output
+        run: |
+          mkdir -p res
+          cp target/near/ajo_on_near.wasm res/
+          cp target/near/ajo_on_near_abi.json res/ 2>/dev/null || true
+          sha256sum res/ajo_on_near.wasm > res/ajo_on_near.wasm.sha256
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add res
+          git diff --cached --quiet || git commit -m "Build contract wasm [skip ci]"
+          git push
