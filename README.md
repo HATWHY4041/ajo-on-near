@@ -12,26 +12,93 @@ Millions of people across Africa save through ajo (also called esusu or susu): a
 
 Ajo on NEAR replaces the human collector with a NEAR smart contract:
 
-1. **Create a circle** — set the contribution amount, how often members pay, and how many members.
-2. **Join with a deposit** — each member locks a small security deposit, which they lose if they stop paying.
-3. **Pay each round** — members pay in any token they hold; NEAR Intents converts it to the circle's stablecoin.
-4. **Automatic payout** — each round, the full pot goes to the next member in line.
-5. **Trust badge** — members who always pay on time earn an onchain trust record for joining future circles.
+1. **Create a circle**: set the contribution amount, round length and number of members. The creator joins by locking a security deposit equal to one contribution.
+2. **Join with a deposit**: each member locks the same deposit. When the circle is full, the payout order is shuffled with the block's random seed and round 1 starts.
+3. **Pay each round**: when every member has paid, the whole pot goes to that round's recipient immediately.
+4. **Missed payments**: after a round's deadline, anyone can call `settle_round`. The missing contribution is taken from the defaulter's deposit, the miss is recorded, and the recipient still gets paid.
+5. **Trust record**: when the circle ends, leftover deposits are refunded and every member's onchain trust record is updated. A circle can require a minimum trust score to join.
 
-**Iya Ajo**, an AI assistant, reminds members before payment day, explains the circle's status in plain language, and answers questions like "when is my turn?"
+**Iya Ajo**, an AI assistant, will remind members before payment day and answer questions like "when is my turn?" (in progress).
 
-## Status
+## Live on testnet
 
-Planning and setup. Development begins November 1, 2026.
+| | |
+|---|---|
+| Contract | [`ajo-on-near.testnet`](https://testnet.nearblocks.io/address/ajo-on-near.testnet) |
+| Network | NEAR testnet |
+| Wasm sha256 | see [`contract/res/ajo_on_near.wasm.sha256`](contract/res/ajo_on_near.wasm.sha256) |
 
-## Planned stack
+## Try it (for judges)
 
-- NEAR smart contract (holds funds, enforces rotation and deposits)
-- NEAR Intents (pay in any token)
-- Web app (create/join circles, see whose turn it is)
-- Iya Ajo AI assistant
-- Runs on NEAR testnet for the demo
+All commands use the [NEAR CLI](https://docs.near.org/tools/near-cli). Amounts are in yoctoNEAR (1 NEAR = 10^24).
 
-## For AI judges
+**Read existing circles** — see circle 0, a completed 2-member circle:
+```bash
+near view ajo-on-near.testnet get_circle '{"circle_id": 0}'
+```
+You'll see `"status": "Completed"`, two `history` entries (one payout per member), and every member with `received_payout: true`.
 
-This section will document the contract methods, how to run the demo, and where each requirement is implemented.
+**Check a trust record**:
+```bash
+near view ajo-on-near.testnet get_trust '{"account_id": "0e4870a750918e6185879c056350c6d9e21ac3597f6211535e0eb26145098d67"}'
+```
+You'll see `circles_completed: 1, on_time_payments: 2, score: 100`.
+
+**Run your own circle** with two testnet accounts (A and B), 0.01 NEAR per round, 5-minute rounds:
+```bash
+near call ajo-on-near.testnet create_circle '{"name":"Test","contribution":"10000000000000000000000","max_members":2,"period_minutes":5}' --accountId A.testnet --deposit 0.01
+# returns the circle id, e.g. 1
+near call ajo-on-near.testnet join_circle '{"circle_id":1}' --accountId B.testnet --deposit 0.01
+near view ajo-on-near.testnet get_circle '{"circle_id":1}'      # status Active, payout order shuffled
+near call ajo-on-near.testnet contribute '{"circle_id":1}' --accountId A.testnet --deposit 0.01
+near call ajo-on-near.testnet contribute '{"circle_id":1}' --accountId B.testnet --deposit 0.01
+near view ajo-on-near.testnet get_circle '{"circle_id":1}'      # history[0]: 0.02 NEAR paid to the first member
+```
+To see a missed payment: in a round, have only A pay, wait for the deadline, then `near call ajo-on-near.testnet settle_round '{"circle_id":1}' --accountId A.testnet`. B's `deposit_left` drops to 0, `missed_payments` becomes 1, and the recipient still gets the full pot.
+
+**Or run the scripted end-to-end check:** `cd scripts && npm install && KEY_A=a.json KEY_B=b.json node smoke-test.js`
+
+**Unit tests** (18 tests: full circle, missed payments, deposit cover, refunds, trust gating, input validation):
+```bash
+cd contract && cargo test
+```
+
+## Contract API
+
+| Method | Type | Description |
+|---|---|---|
+| `create_circle(name, contribution, max_members, period_minutes, min_trust_score?)` | call, attach `contribution` | Open a circle (2–20 members, 1 min–31 day rounds); creator joins. Returns id. |
+| `join_circle(circle_id)` | call, attach `deposit` | Join an open circle; starts it when full. |
+| `leave_circle(circle_id)` | call | Leave before start; deposit refunded. |
+| `contribute(circle_id)` | call, attach `contribution` | Pay this round; last payer triggers the payout. |
+| `settle_round(circle_id)` | call | After the deadline: cover unpaid shares from deposits and pay out. |
+| `get_circle(circle_id)` | view | One circle with members, order, pot, history. |
+| `get_circles(from_index?, limit?)` | view | Paginated list. |
+| `get_circles_for(account_id)` | view | Circles an account belongs to. |
+| `get_trust(account_id)` | view | Circles completed, on-time and missed payments, score 0–100. |
+| `get_circle_count()`, `now_ms()` | view | Helpers for clients. |
+
+The contract emits NEP-297 style `EVENT_JSON` logs (`circle_created`, `member_joined`, `circle_started`, `contribution`, `missed_payment`, `payout`, `circle_completed`) for indexers.
+
+**Known limits:** a security deposit equals one contribution, so it covers one missed payment. A member who has already been paid and then stops paying can cost the group at most their deposit plus later shortfalls, which are visible in `history[].missed_by` and their trust record. Circles use native NEAR. Stablecoin and any-token payments (NEAR Intents) are planned next.
+
+## Repository layout
+
+```
+contract/          Rust smart contract (near-sdk 5.30)
+  src/lib.rs       contract
+  src/tests.rs     unit tests
+  res/             wasm + ABI built by CI (cargo-near)
+scripts/           deploy and end-to-end scripts (near-api-js)
+.github/workflows  CI: tests, builds wasm with cargo-near
+```
+
+## Built with
+
+- NEAR Protocol (testnet), [near-sdk-rs](https://github.com/near/near-sdk-rs) 5.30, [cargo-near](https://github.com/near/cargo-near)
+- [near-api-js](https://github.com/near/near-api-js) 7 for scripts
+- No templates or pre-hackathon code. Code was written with the help of an AI coding assistant (Claude).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
