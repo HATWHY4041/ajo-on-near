@@ -134,7 +134,7 @@ pub struct Contract {
     trust: LookupMap<AccountId, TrustRecord>,
 }
 
-fn now_ms() -> u64 {
+fn block_ms() -> u64 {
     env::block_timestamp() / NS_PER_MS
 }
 
@@ -212,7 +212,7 @@ impl Contract {
             round_deadline_ms: 0,
             pot: U128(0),
             history: vec![],
-            created_at_ms: now_ms(),
+            created_at_ms: block_ms(),
         };
         self.circles.push(circle);
         emit(
@@ -290,7 +290,7 @@ impl Contract {
         let i = Self::index_of(&c, &who).unwrap_or_else(|| env::panic_str("Not a member"));
         require!(!c.members[i].paid_this_round, "Already paid this round");
         require!(
-            now_ms() <= c.round_deadline_ms,
+            block_ms() <= c.round_deadline_ms,
             "This round's deadline has passed; call settle_round first"
         );
         require!(
@@ -322,7 +322,7 @@ impl Contract {
         let mut c = self.load(circle_id);
         require!(c.status == CircleStatus::Active, "Circle is not active");
         require!(
-            now_ms() > c.round_deadline_ms,
+            block_ms() > c.round_deadline_ms,
             "The round deadline has not passed yet"
         );
         let contribution = c.contribution.0;
@@ -391,7 +391,7 @@ impl Contract {
 
     /// Current block time in ms, so clients can show countdowns.
     pub fn now_ms(&self) -> u64 {
-        now_ms()
+        block_ms()
     }
 
     // ------------------------------------------------------------- internal
@@ -433,7 +433,7 @@ impl Contract {
         }
         c.status = CircleStatus::Active;
         c.current_round = 0;
-        c.round_deadline_ms = now_ms() + c.period_minutes as u64 * MS_PER_MINUTE;
+        c.round_deadline_ms = block_ms() + c.period_minutes as u64 * MS_PER_MINUTE;
         let order: Vec<String> = c
             .members
             .iter()
@@ -462,7 +462,7 @@ impl Contract {
             recipient: recipient.clone(),
             amount: U128(amount),
             missed_by,
-            paid_at_ms: now_ms(),
+            paid_at_ms: block_ms(),
         });
         emit(
             "payout",
@@ -493,7 +493,7 @@ impl Contract {
             }
             emit("circle_completed", format!("{{\"circle_id\":{}}}", c.id));
         } else {
-            c.round_deadline_ms = now_ms() + c.period_minutes as u64 * MS_PER_MINUTE;
+            c.round_deadline_ms = block_ms() + c.period_minutes as u64 * MS_PER_MINUTE;
         }
     }
 }
