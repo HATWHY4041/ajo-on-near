@@ -187,7 +187,7 @@ input[aria-invalid="true"] { border-color: var(--kola); }
 
 /* ---------------------------------------------------------------- detail */
 .detail__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(2rem, 5vw, 4rem); align-items: start; }
-.detail__ring { position: sticky; top: 1rem; }
+.detail__ring { display: grid; gap: 1.5rem; align-content: start; }
 .detail h1 { margin-bottom: 0.5rem; }
 .detail h2 { font-size: var(--step-1); margin: 2rem 0 0.5rem; }
 .terms { color: var(--muted); }
@@ -314,10 +314,6 @@ h3 { font: 700 var(--step-1)/1.2 var(--display); margin: 0 0 0.6rem; letter-spac
 .faq details[open] summary::after { content: "–"; }
 .faq details p { color: var(--muted); padding-bottom: 1.1rem; margin: 0; max-width: 44rem; }
 
-.roadmap__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; max-width: 52rem; }
-.roadmap__list li { display: grid; grid-template-columns: 6rem 1fr; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); color: var(--muted); }
-.roadmap__list strong { color: var(--ink); font-family: var(--display); }
-.roadmap__list .is-done strong { color: var(--leaf); }
 
 .cta {
   margin: 0 0 4rem; padding: clamp(2.5rem, 6vw, 4.5rem) clamp(1.5rem, 5vw, 4rem); border-radius: 28px; text-align: left;
@@ -375,4 +371,69 @@ h3 { font: 700 var(--step-1)/1.2 var(--display); margin: 0 0 0.6rem; letter-spac
 @media (prefers-reduced-motion: reduce) {
   .ring__turn { animation: none; }
   .btn { transition: none; }
+}
+
+/* ---------------------------------------------------------- stablecoins */
+.btn--small { padding: 0.4rem 0.8rem; font-size: var(--step--1); }
+
+.currency, .paywith { border: 0; padding: 0; margin: 0; display: grid; gap: 0.5rem; }
+.currency legend, .paywith legend { font-weight: 700; padding: 0; margin-bottom: 0.4rem; }
+.currency__opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+.currency__opt, .paywith__opt {
+  display: grid; gap: 0.15rem; padding: 0.8rem 0.9rem; border: 2px solid var(--line); border-radius: 14px;
+  background: #fff; cursor: pointer; position: relative;
+}
+.currency__opt input, .paywith__opt input { position: absolute; opacity: 0; pointer-events: none; }
+.currency__opt strong { font: 700 var(--step-1)/1.1 var(--display); }
+.currency__opt span { color: var(--muted); font-size: var(--step--1); line-height: 1.35; }
+.currency__opt.is-on, .paywith__opt.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.currency__opt:has(input:focus-visible), .paywith__opt:has(input:focus-visible) { outline: 3px solid var(--gold); outline-offset: 2px; }
+.paywith { margin: 0 0 1rem; }
+.paywith__opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.paywith__sym { font: 700 var(--step-0)/1.1 var(--display); }
+.paywith__cost { font-weight: 700; }
+.paywith__note { color: var(--muted); font-size: 0.8rem; line-height: 1.3; }
+
+.wallet { margin: 1.5rem 0 0; padding: 1.1rem 1.25rem; border-radius: 18px; background: var(--wash); }
+.wallet__head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.wallet h2, .detail .wallet h2 { font-size: var(--step-0); margin: 0 0 0.6rem; font-family: var(--display); }
+.wallet__note { color: var(--muted); font-size: var(--step--1); }
+.wallet__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.wallet__list li { display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem; align-items: center; }
+.wallet__amt { font: 700 var(--step-1)/1 var(--display); font-variant-numeric: tabular-nums; }
+.wallet__sym { color: var(--muted); font-weight: 700; }
+
+.stable__flow { list-style: none; padding: 0; margin: 0 0 1.25rem; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; counter-reset: sf; }
+.stable__flow li { counter-increment: sf; background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 1.25rem; color: var(--muted); }
+.stable__flow li::before { content: counter(sf); display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; background: var(--gold); color: var(--ink); font: 800 var(--step-0)/1 var(--display); margin-bottom: 0.7rem; }
+.stable__flow strong { display: block; color: var(--ink); font-size: var(--step-1); line-height: 1.25; margin-bottom: 0.35rem; }
+.stable__note { color: var(--muted); max-width: 52rem; font-size: var(--step--1); }
+.stable__note a { word-break: break-all; }
+
+/* ---------------------------------------------------------- Iya Ajo */
+.iya { border: 2px solid var(--ink); border-radius: 20px; background: #fff; overflow: hidden; }
+.iya__head { display: flex; gap: 0.8rem; align-items: center; padding: 0.9rem 1.1rem; background: var(--ink); color: var(--paper); }
+.iya__head h2, .detail .iya__head h2 { margin: 0; font-size: var(--step-1); color: var(--paper); }
+.iya__head p { margin: 0; font-size: var(--step--1); opacity: 0.8; }
+.iya__face { flex: none; width: 2.6rem; height: 2.6rem; border-radius: 50%; background: var(--gold); color: var(--ink); display: grid; place-items: center; font: 800 var(--step-0)/1 var(--display); }
+.iya__log { list-style: none; margin: 0; padding: 1rem; display: grid; gap: 0.6rem; max-height: 19rem; overflow-y: auto; align-content: start; }
+.iya__msg { max-width: 88%; padding: 0.6rem 0.85rem; border-radius: 16px; line-height: 1.4; font-size: 0.95rem; }
+.iya__msg--iya { background: var(--wash); border-bottom-left-radius: 4px; justify-self: start; }
+.iya__msg--you { background: var(--gold); color: var(--ink); font-weight: 700; border-bottom-right-radius: 4px; justify-self: end; }
+.iya__chips { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0 1rem 0.8rem; }
+.chip-btn { font: 700 0.8rem/1.2 var(--body); padding: 0.4rem 0.7rem; border-radius: 999px; border: 1.5px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; }
+.chip-btn:hover { border-color: var(--ink); }
+.iya__form { display: flex; gap: 0.5rem; padding: 0.8rem 1rem 1rem; border-top: 1px solid var(--line); }
+.iya__form input { flex: 1; min-width: 0; }
+
+/* ---------------------------------------------------------- reminders */
+.remind { margin: 1.5rem 0 0.5rem; padding: 1.25rem; border-radius: 18px; border: 2px solid var(--line); background: #fff; }
+.detail .remind h2 { margin: 0 0 0.35rem; font-size: var(--step-1); }
+.remind__text { color: var(--muted); margin: 0 0 0.9rem; }
+.remind__btns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.remind__btns .btn { padding: 0.5rem 0.95rem; font-size: var(--step--1); }
+
+@media (max-width: 760px) {
+  .currency__opts, .paywith__opts { grid-template-columns: 1fr; }
+  .stable__flow { grid-template-columns: 1fr; }
 }

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  CONTRACT_ID, EXPLORER, Circle, Trust, call, connector, explainError, fromYocto, getCircle,
-  getCircles, getTrust, periodLabel, shortAccount, timeLeft, times, toYocto,
+  CONTRACT_ID, CURRENCIES, Circle, Currency, EXPLORER, NEAR, TUSDC, Trust, call, connector, currencyOf, explainError,
+  getCircle, getCircles, getTrust, money, payIn, periodLabel, shortAccount, timeLeft, times, toUnits,
 } from "./near";
 import { Ring } from "./Ring";
 import { Landing } from "./Landing";
+import { IyaAjo, PayWith, Reminders, Wallet, useBalances } from "./Extras";
 
 // ---------------------------------------------------------------- hooks
 
@@ -93,6 +94,7 @@ export default function App() {
           <nav className="top__links" aria-label="Sections">
             <a href="#how">How it works</a>
             <a href="#features">Features</a>
+            <a href="#stablecoins">Stablecoins</a>
             <a href="#rules">Rules</a>
             <a href="#circles">Circles</a>
             <a href="#faq">FAQ</a>
@@ -152,7 +154,7 @@ export default function App() {
             </ul>
           </div>
         </div>
-        <p className="foot__small">Runs on NEAR testnet with test tokens, so no real money moves. Contract {CONTRACT_ID}.</p>
+        <p className="foot__small">Runs on NEAR testnet with test tokens (test NEAR, tUSDC and tUSDT), so no real money moves. Contract {CONTRACT_ID}.</p>
       </footer>
     </>
   );
@@ -212,7 +214,7 @@ function CircleList({ circles, account }: { circles: Circle[]; account: string |
           <li key={c.id}>
             <a className="row" href={`#/circle/${c.id}`}>
               <span className="row__name">{c.name}</span>
-              <span className="row__money"><strong>{fromYocto(c.contribution)} NEAR</strong> {periodLabel(c.period_minutes)}</span>
+              <span className="row__money"><strong>{money(c.contribution, c.token)}</strong> {periodLabel(c.period_minutes)}</span>
               <span className="row__seats">
                 {c.status === "Open" ? `${c.members.length} of ${c.max_members} seats` :
                   c.status === "Active" ? `Round ${c.current_round + 1} of ${c.max_members}` : "Complete"}
@@ -259,7 +261,10 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
   account: string | null; signIn: () => void; setNotice: (n: Notice) => void; onCreated: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
-  const [amount, setAmount] = useState("0.5");
+  const [cur, setCur] = useState<Currency>(TUSDC);
+  const [payWith, setPayWith] = useState<Currency>(TUSDC);
+  const [amount, setAmount] = useState("10");
+  const { balances, reload } = useBalances(account);
   const [members, setMembers] = useState(5);
   const [period, setPeriod] = useState(10080);
   const [minTrust, setMinTrust] = useState(0);
@@ -268,9 +273,16 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
   let yocto: string | null = null;
   let amountError: string | null = null;
   try {
-    yocto = toYocto(amount);
+    yocto = toUnits(amount, cur.decimals);
     if (BigInt(yocto) === 0n) { yocto = null; amountError = "Enter an amount above 0"; }
   } catch (e) { amountError = (e as Error).message; }
+  const fmt = (v: string) => money(v, cur.id);
+
+  function pickCurrency(c: Currency) {
+    setCur(c);
+    setPayWith(c);
+    setAmount(c.id ? "10" : "0.5");
+  }
 
   const periodText = PERIODS.find((p) => p.minutes === period)?.label.toLowerCase().replace(/ \(.*\)/, "") ?? periodLabel(period);
 
@@ -280,11 +292,11 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
     if (!yocto || !name.trim()) return;
     setBusy(true);
     try {
-      await call("create_circle", {
-        name: name.trim(), contribution: yocto, max_members: members, period_minutes: period,
-        min_trust_score: minTrust || null,
-      }, yocto);
+      await payIn(cur.id, cur.id ? payWith : NEAR, yocto, {
+        action: "create", name: name.trim(), max_members: members, period_minutes: period, min_trust_score: minTrust || null,
+      });
       await onCreated();
+      reload();
       const all = await getCircles();
       const created = [...all].reverse().find((c) => c.creator === account && c.name === name.trim());
       setNotice({ kind: "ok", text: "Circle created. Now invite your members." });
@@ -306,8 +318,20 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
           <span>Circle name</span>
           <input value={name} maxLength={64} required placeholder="Ikeja traders" onChange={(e) => setName(e.target.value)} />
         </label>
+        <fieldset className="currency">
+          <legend>Save in</legend>
+          <div className="currency__opts">
+            {CURRENCIES.map((c) => (
+              <label key={c.symbol} className={`currency__opt${cur.symbol === c.symbol ? " is-on" : ""}`}>
+                <input type="radio" name="currency" checked={cur.symbol === c.symbol} onChange={() => pickCurrency(c)} />
+                <strong>{c.symbol}</strong>
+                <span>{c.id ? `${c.name}, a dollar test stablecoin` : "Native NEAR"}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <label>
-          <span>Each payment, in NEAR</span>
+          <span>Each payment, in {cur.symbol}</span>
           <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={!!amountError} />
           {amountError && <em className="field-error">{amountError}</em>}
         </label>
@@ -335,16 +359,21 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
 
         {yocto && (
           <p className="summary">
-            Each member locks <strong>{fromYocto(yocto)} NEAR</strong> as a deposit, then pays{" "}
-            <strong>{fromYocto(yocto)} NEAR</strong> {periodText}. Each round, one member collects{" "}
-            <strong>{fromYocto(times(yocto, members))} NEAR</strong>. The circle runs {members} rounds.
+            Each member locks <strong>{fmt(yocto)}</strong> as a deposit, then pays{" "}
+            <strong>{fmt(yocto)}</strong> {periodText}. Each round, one member collects{" "}
+            <strong>{fmt(times(yocto, members))}</strong>. The circle runs {members} rounds.
           </p>
         )}
 
+        {account && yocto && cur.id && (
+          <PayWith token={cur.id} amount={yocto} value={payWith} onChange={setPayWith} balances={balances} />
+        )}
+
         <button className="btn btn--primary btn--big" disabled={busy || (!!account && (!yocto || !name.trim()))}>
-          {!account ? "Connect wallet to continue" : busy ? "Waiting for your wallet…" : `Create circle and lock ${yocto ? fromYocto(yocto) : ""} NEAR`}
+          {!account ? "Connect wallet to continue" : busy ? "Waiting for your wallet…" : `Create circle and lock ${yocto ? fmt(yocto) : ""}`}
         </button>
       </form>
+      {account && <Wallet account={account} balances={balances} reload={reload} setNotice={setNotice} />}
     </section>
   );
 }
@@ -356,6 +385,8 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
 }) {
   const [c, setC] = useState<Circle | null | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
+  const [payWith, setPayWith] = useState<Currency | null>(null);
+  const { balances, reload } = useBalances(account);
   const now = useNow();
 
   const load = useCallback(() => getCircle(id).then(setC).catch(() => setC(null)), [id]);
@@ -373,14 +404,21 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
   const recipient = c.status === "Active" ? c.members[c.current_round] : null;
   const late = c.status === "Active" && now > c.round_deadline_ms;
   const pot = times(c.contribution, c.max_members);
+  const fmt = (v: string) => money(v, c.token);
+  const using = payWith ?? currencyOf(c.token);
 
   async function act(method: string, deposit: string, done: string) {
     if (!account) return signIn();
     setBusy(method);
     try {
-      await call(method, { circle_id: id }, deposit);
+      if (method === "join_circle" || method === "contribute") {
+        await payIn(c!.token ?? null, using, deposit, { action: method === "join_circle" ? "join" : "contribute", circle_id: id });
+      } else {
+        await call(method, { circle_id: id }, "0");
+      }
       await load();
       await onChanged();
+      reload();
       setNotice({ kind: "ok", text: done });
     } catch (e) {
       setNotice({ kind: "error", text: explainError(e) });
@@ -388,6 +426,10 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
       setBusy(null);
     }
   }
+
+  const payChoice = account && c.token ? (
+    <PayWith token={c.token} amount={c.status === "Open" ? c.deposit : c.contribution} value={using} onChange={setPayWith} balances={balances} />
+  ) : null;
 
   let action: React.ReactNode = null;
   if (c.status === "Open") {
@@ -399,9 +441,12 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
         </button>
       </>
     ) : (
-      <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("join_circle", c.deposit, "You joined the circle.")}>
-        {!account ? "Connect wallet to join" : busy ? "Waiting for your wallet…" : `Join and lock ${fromYocto(c.deposit)} NEAR deposit`}
-      </button>
+      <>
+        {payChoice}
+        <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("join_circle", c.deposit, "You joined the circle.")}>
+          {!account ? "Connect wallet to join" : busy ? "Waiting for your wallet…" : `Join and lock ${fmt(c.deposit)} deposit`}
+        </button>
+      </>
     );
   } else if (c.status === "Active") {
     const settle = (
@@ -418,9 +463,12 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
       );
     } else if (member && !member.paid_this_round) {
       action = (
-        <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("contribute", c.contribution, "Payment sent. Thank you for paying on time.")}>
-          {busy ? "Waiting for your wallet…" : `Pay ${fromYocto(c.contribution)} NEAR for round ${c.current_round + 1}`}
-        </button>
+        <>
+          {payChoice}
+          <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("contribute", c.contribution, "Payment sent. Thank you for paying on time.")}>
+            {busy ? "Waiting for your wallet…" : `Pay ${fmt(c.contribution)} for round ${c.current_round + 1}`}
+          </button>
+        </>
       );
     } else if (member) {
       action = <p className="state state--ok">You've paid for round {c.current_round + 1}. The pot goes out as soon as everyone else pays.</p>;
@@ -438,12 +486,13 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
         <div className="detail__ring">
           <Ring circle={c} me={account} />
           {c.status === "Active" && <Legend />}
+          <IyaAjo circle={c} account={account} now={now} />
         </div>
         <div className="detail__side">
           <h1>{c.name}</h1>
           <p className="terms">
-            <strong>{fromYocto(c.contribution)} NEAR</strong> {periodLabel(c.period_minutes)}, {c.max_members} members.
-            Each payout is <strong>{fromYocto(pot)} NEAR</strong>.
+            <strong>{fmt(c.contribution)}</strong> {periodLabel(c.period_minutes)}, {c.max_members} members.
+            Each payout is <strong>{fmt(pot)}</strong>.
             {c.min_trust_score > 0 && <> Members need a trust score of {c.min_trust_score} or more.</>}
           </p>
 
@@ -459,6 +508,12 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
           )}
 
           <div className="action">{action}</div>
+
+          {account && member && c.status !== "Completed" && c.token && (
+            <Wallet account={account} balances={balances} reload={reload} setNotice={setNotice} />
+          )}
+
+          <Reminders circle={c} now={now} />
 
           {c.status !== "Completed" && <Invite circle={c} highlight={c.status === "Open"} />}
 
@@ -489,7 +544,7 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
               <ol className="history">
                 {[...c.history].reverse().map((h) => (
                   <li key={h.round}>
-                    <span>Round {h.round}: <strong>{fromYocto(h.amount)} NEAR</strong> to {shortAccount(h.recipient)}</span>
+                    <span>Round {h.round}: <strong>{fmt(h.amount)}</strong> to {shortAccount(h.recipient)}</span>
                     <span className="history__when">{new Date(h.paid_at_ms).toLocaleString()}</span>
                     {h.missed_by.length > 0 && (
                       <span className="history__miss">Covered from the deposit of {h.missed_by.map(shortAccount).join(", ")}</span>
@@ -520,8 +575,8 @@ function Legend() {
 function inviteText(c: Circle): string {
   const seats = c.max_members - c.members.length;
   return c.status === "Open"
-    ? `Join my ajo "${c.name}" on NEAR: ${fromYocto(c.contribution)} NEAR ${periodLabel(c.period_minutes)}, ${c.max_members} members, ${seats} seat${seats === 1 ? "" : "s"} left. The contract holds the money and pays each of us in turn.`
-    : `Follow our ajo "${c.name}" on NEAR: ${fromYocto(c.contribution)} NEAR ${periodLabel(c.period_minutes)}, round ${c.current_round + 1} of ${c.max_members}.`;
+    ? `Join my ajo "${c.name}" on NEAR: ${money(c.contribution, c.token)} ${periodLabel(c.period_minutes)}, ${c.max_members} members, ${seats} seat${seats === 1 ? "" : "s"} left. The contract holds the money and pays each of us in turn.`
+    : `Follow our ajo "${c.name}" on NEAR: ${money(c.contribution, c.token)} ${periodLabel(c.period_minutes)}, round ${c.current_round + 1} of ${c.max_members}.`;
 }
 
 function Invite({ circle, highlight }: { circle: Circle; highlight: boolean }) {

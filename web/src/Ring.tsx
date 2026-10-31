@@ -1,4 +1,4 @@
-import { Circle, fromYocto, initials, shortAccount, times } from "./near";
+import { Circle, initials, money, shortAccount, times } from "./near";
 
 type SeatState = "collecting" | "paid" | "waiting" | "collected" | "empty";
 
@@ -40,7 +40,7 @@ export function Ring({ circle, me, size = "large" }: { circle: Circle; me?: stri
     centerTop = `${circle.members.length} of ${n}`;
     centerBottom = ["seats taken"];
   } else if (circle.status === "Active") {
-    centerTop = `${fromYocto(potFull)} NEAR`;
+    centerTop = money(potFull, circle.token);
     centerBottom = [`round ${circle.current_round + 1} of ${n}`, `${paidCount} of ${circle.members.length} paid`];
   } else {
     centerTop = "Complete";

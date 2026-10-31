@@ -5,6 +5,35 @@ export const NETWORK = "testnet" as const;
 const RPC = import.meta.env.VITE_RPC || "https://rpc.testnet.near.org";
 export const EXPLORER = "https://testnet.nearblocks.io";
 
+// ---------------------------------------------------------------- currencies
+
+export interface Currency {
+  id: string | null; // token contract, or null for NEAR
+  symbol: string;
+  name: string;
+  decimals: number;
+}
+
+export const USDC_ID = import.meta.env.VITE_USDC_ID || "usdc.ajo-on-near.testnet";
+export const USDT_ID = import.meta.env.VITE_USDT_ID || "usdt.ajo-on-near.testnet";
+
+export const NEAR: Currency = { id: null, symbol: "NEAR", name: "NEAR", decimals: 24 };
+export const TUSDC: Currency = { id: USDC_ID, symbol: "tUSDC", name: "Test USDC", decimals: 6 };
+export const TUSDT: Currency = { id: USDT_ID, symbol: "tUSDT", name: "Test USDT", decimals: 6 };
+export const CURRENCIES = [TUSDC, TUSDT, NEAR];
+/** Fixed test rate used by the test tokens: 1 NEAR buys this many tUSDC or tUSDT. */
+export const TEST_RATE = 2.5;
+
+export function currencyOf(token: string | null | undefined): Currency {
+  return CURRENCIES.find((c) => c.id === (token ?? null)) ?? { id: token ?? null, symbol: token ?? "NEAR", name: token ?? "NEAR", decimals: 24 };
+}
+
+/** Amount in a circle's currency, e.g. "10 tUSDC". */
+export function money(amount: string | bigint, token: string | null | undefined, maxDecimals = 4): string {
+  const cur = currencyOf(token);
+  return `${fromUnits(amount, cur.decimals, maxDecimals)} ${cur.symbol}`;
+}
+
 // ---------------------------------------------------------------- types
 
 export type Status = "Open" | "Active" | "Completed";
@@ -42,6 +71,8 @@ export interface Circle {
   pot: string;
   history: RoundRecord[];
   created_at_ms: number;
+  /** NEP-141 token the circle runs in; null = NEAR. */
+  token?: string | null;
 }
 
 export interface Trust {
@@ -53,6 +84,32 @@ export interface Trust {
 }
 
 // ---------------------------------------------------------------- views
+
+async function rpc(params: object) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "ajo", method: "query", params }),
+  });
+  return res.json();
+}
+
+/** Read-only call on any testnet contract. */
+export async function viewOn<T>(contract: string, method: string, args: object = {}): Promise<T> {
+  const json = await rpc({
+    request_type: "call_function", finality: "optimistic", account_id: contract,
+    method_name: method, args_base64: btoa(JSON.stringify(args)),
+  });
+  if (json.error || json.result?.error) throw new Error(json.error?.data || json.result?.error || "Could not reach NEAR testnet");
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(json.result.result)));
+}
+
+/** Balance of `account` in a currency, in its smallest unit. */
+export async function balanceOf(cur: Currency, account: string): Promise<string> {
+  if (cur.id) return viewOn<string>(cur.id, "ft_balance_of", { account_id: account });
+  const json = await rpc({ request_type: "view_account", finality: "optimistic", account_id: account });
+  return json.result?.amount ?? "0";
+}
 
 async function view<T>(method: string, args: object = {}): Promise<T> {
   const res = await fetch(RPC, {
@@ -88,35 +145,86 @@ export const connector = new NearConnector({ network: NETWORK, autoConnect: true
 
 const GAS = "100000000000000"; // 100 Tgas
 
-export async function call(methodName: string, args: object, deposit = "0") {
+const GAS_MAX = "300000000000000"; // 300 Tgas, for token payments that may pay out the pot
+
+export async function call(methodName: string, args: object, deposit = "0", receiverId = CONTRACT_ID, gas = GAS) {
   const wallet = await connector.wallet();
-  return wallet.signAndSendTransaction({
-    receiverId: CONTRACT_ID,
-    actions: [{ type: "FunctionCall", params: { methodName, args, gas: GAS, deposit } }],
+  const outcome = await wallet.signAndSendTransaction({
+    receiverId,
+    actions: [{ type: "FunctionCall", params: { methodName, args, gas, deposit } }],
   });
+  // A token payment the circle refuses still "succeeds" as a transaction (the
+  // tokens are refunded), so look for the circle's reason in the receipts.
+  const failed = JSON.stringify(outcome ?? "").match(/Smart contract panicked: ([^"\\]+)/);
+  if (failed) throw new Error(`${failed[1].trim()} Your tokens were returned.`);
+  return outcome;
 }
+
+export type FtAction =
+  | { action: "create"; name: string; max_members: number; period_minutes: number; min_trust_score: number | null }
+  | { action: "join"; circle_id: number }
+  | { action: "contribute"; circle_id: number };
+
+const NEAR_METHOD = { join: "join_circle", contribute: "contribute" } as const;
+
+/**
+ * Pay `amount` into a circle for create / join / contribute, in one transaction.
+ * NEAR circles take NEAR. Stablecoin circles take their own token directly, the
+ * other test stablecoin (swapped 1:1 on the way), or NEAR (bought at the fixed
+ * test rate on the way).
+ */
+export async function payIn(circleToken: string | null, payWith: Currency, amount: string, act: FtAction) {
+  if (!circleToken) {
+    if (payWith.id) throw new Error("This circle runs in NEAR, so pay with NEAR.");
+    if (act.action === "create") {
+      const { action: _a, ...rest } = act;
+      return call("create_circle", { ...rest, contribution: amount }, amount);
+    }
+    return call(NEAR_METHOD[act.action], { circle_id: act.circle_id }, amount);
+  }
+  const msg = JSON.stringify(act);
+  if (payWith.id === circleToken) {
+    return call("ft_transfer_call", { receiver_id: CONTRACT_ID, amount, msg }, "1", circleToken, GAS_MAX);
+  }
+  if (payWith.id) {
+    // Swap the partner test stablecoin into the circle's token, then forward it to the circle.
+    return call("ft_transfer_call", {
+      receiver_id: circleToken, amount, msg: JSON.stringify({ receiver_id: CONTRACT_ID, msg }),
+    }, "1", payWith.id, GAS_MAX);
+  }
+  const near = await viewOn<string>(circleToken, "near_for", { amount });
+  return call("buy_with_near", { receiver_id: CONTRACT_ID, forward_amount: amount, msg }, near, circleToken, GAS_MAX);
+}
+
+/** What paying `amount` of a circle's token costs in another currency. */
+export async function costIn(circleToken: string | null, payWith: Currency, amount: string): Promise<string> {
+  if (!circleToken || payWith.id) return amount;
+  return viewOn<string>(circleToken, "near_for", { amount });
+}
+
+export const faucet = (token: string) => call("faucet", {}, "0", token, "30000000000000");
 
 // ---------------------------------------------------------------- units
 
-const DECIMALS = 24;
-
-/** "1.5" NEAR -> yoctoNEAR string. */
-export function toYocto(near: string): string {
-  const clean = near.trim();
+/** "1.5" -> smallest units for a token with `decimals`. */
+export function toUnits(value: string, decimals: number): string {
+  const clean = value.trim();
   if (!/^\d*\.?\d*$/.test(clean) || clean === "" || clean === ".") throw new Error("Enter an amount like 0.5");
   const [whole, frac = ""] = clean.split(".");
-  if (frac.length > DECIMALS) throw new Error("Too many decimal places");
-  const yocto = BigInt((whole || "0") + frac.padEnd(DECIMALS, "0"));
-  return yocto.toString();
+  if (frac.length > decimals) throw new Error(`At most ${decimals} decimal places`);
+  return BigInt((whole || "0") + frac.padEnd(decimals, "0")).toString();
 }
 
-/** yoctoNEAR string -> "1.5" NEAR, trimmed. */
-export function fromYocto(yocto: string | bigint, maxDecimals = 4): string {
-  const s = BigInt(yocto).toString().padStart(DECIMALS + 1, "0");
-  const whole = s.slice(0, -DECIMALS);
-  let frac = s.slice(-DECIMALS).slice(0, maxDecimals).replace(/0+$/, "");
+/** Smallest units -> "1.5", trimmed. */
+export function fromUnits(units: string | bigint, decimals: number, maxDecimals = 4): string {
+  const s = BigInt(units).toString().padStart(decimals + 1, "0");
+  const whole = s.slice(0, -decimals);
+  const frac = s.slice(-decimals).slice(0, maxDecimals).replace(/0+$/, "");
   return frac ? `${Number(whole).toLocaleString()}.${frac}` : Number(whole).toLocaleString();
 }
+
+export const toYocto = (near: string) => toUnits(near, 24);
+export const fromYocto = (yocto: string | bigint, maxDecimals = 4) => fromUnits(yocto, 24, maxDecimals);
 
 export const times = (yocto: string, n: number) => (BigInt(yocto) * BigInt(n)).toString();
 
@@ -159,5 +267,7 @@ export function explainError(e: unknown): string {
   if (smart) return smart[1].trim();
   if (/reject|cancel|closed/i.test(raw)) return "You closed the wallet before approving. Nothing was sent.";
   if (/NotEnoughBalance|insufficient/i.test(raw)) return "Your wallet doesn't have enough test NEAR for this.";
+  if (/enough balance/i.test(raw)) return "You don't have enough of that test token. Use the Get test tokens button first.";
+  if (/Faucet used/i.test(raw)) return "You already used the faucet in the last hour. Try again later, or pay with NEAR.";
   return raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
 }

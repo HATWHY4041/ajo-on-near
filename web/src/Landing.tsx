@@ -1,13 +1,13 @@
 import { useMemo } from "react";
-import { CONTRACT_ID, EXPLORER, Circle, fromYocto, toYocto } from "./near";
+import { CONTRACT_ID, EXPLORER, Circle, TEST_RATE, USDC_ID, USDT_ID, money, toUnits } from "./near";
 import { Ring } from "./Ring";
 
 const EXAMPLE: Circle = {
-  id: -1, name: "Example", creator: "", contribution: toYocto("10"), deposit: toYocto("10"),
+  id: -1, name: "Example", creator: "", contribution: toUnits("10", 6), deposit: toUnits("10", 6),
   max_members: 6, period_minutes: 10080, min_trust_score: 0, status: "Active", current_round: 2,
-  round_deadline_ms: 0, pot: "0", history: [], created_at_ms: 0,
+  round_deadline_ms: 0, pot: "0", history: [], created_at_ms: 0, token: USDC_ID,
   members: ["amaka", "tunde", "bisi", "kelechi", "funmi", "sade"].map((n, i) => ({
-    account_id: `${n}.testnet`, deposit_left: toYocto("10"), paid_this_round: [0, 1, 3, 4].includes(i),
+    account_id: `${n}.testnet`, deposit_left: toUnits("10", 6), paid_this_round: [0, 1, 3, 4].includes(i),
     on_time_payments: 0, missed_payments: 0, received_payout: i < 2,
   })),
 };
@@ -20,19 +20,21 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
   );
   const stats = useMemo(() => {
     const list = circles ?? [];
-    let paid = 0n;
+    const paid = new Map<string, bigint>();
     let payouts = 0;
     const people = new Set<string>();
     for (const c of list) {
       c.members.forEach((m) => people.add(m.account_id));
-      for (const h of c.history) { paid += BigInt(h.amount); payouts++; }
+      const key = c.token ?? "";
+      for (const h of c.history) { paid.set(key, (paid.get(key) ?? 0n) + BigInt(h.amount)); payouts++; }
     }
+    const parts = [...paid.entries()].filter(([, v]) => v > 0n).map(([k, v]) => money(v, k || null, 2));
     return {
       circles: list.length,
       running: list.filter((c) => c.status !== "Completed").length,
       people: people.size,
       payouts,
-      paid: fromYocto(paid, 2),
+      paid: parts.length ? parts.join(" + ") : "0",
     };
   }, [circles]);
 
@@ -43,20 +45,20 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
           <h1>Save together. Nobody runs off with the pot.</h1>
           <p className="lede">
             Ajo, esusu, susu: the savings circle you already know. Everyone pays in each round and one member
-            takes home the whole pot. Here, a contract on NEAR holds the money instead of a collector, and pays
-            each member in turn.
+            takes home the whole pot. Here, a contract on NEAR holds the money instead of a collector, pays
+            each member in turn, and lets you save in dollars or NEAR.
           </p>
           <div className="hero__actions">
             <a className="btn btn--primary btn--big" href="#/new">Start a circle</a>
             <a className="btn btn--line btn--big" href="#circles">Find a circle to join</a>
           </div>
-          <p className="hero__note">Live on NEAR testnet. Use free test NEAR to try every step.</p>
+          <p className="hero__note">Live on NEAR testnet with free test tokens. Try every step at no cost.</p>
         </div>
         <div className="hero__ring">
           <Ring circle={featured} />
           <p className="caption">
             {featured.id < 0 ? (
-              <>Example: six friends saving 10 NEAR a week. Round 3 of 6, and Bisi collects 60 NEAR once the last two pay.</>
+              <>Example: six friends saving 10 tUSDC a week. Round 3 of 6, and Bisi collects 60 tUSDC once the last two pay.</>
             ) : (
               <>Live: <a href={`#/circle/${featured.id}`}>{featured.name}</a>, round {featured.current_round + 1} of {featured.max_members}.</>
             )}
@@ -68,7 +70,7 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
         <div><strong>{circles ? stats.circles : "…"}</strong><span>circles created</span></div>
         <div><strong>{circles ? stats.running : "…"}</strong><span>open or running now</span></div>
         <div><strong>{circles ? stats.people : "…"}</strong><span>members</span></div>
-        <div><strong>{circles ? `${stats.paid} NEAR` : "…"}</strong><span>paid out in {stats.payouts} payouts</span></div>
+        <div><strong>{circles ? stats.paid : "…"}</strong><span>paid out in {stats.payouts} payouts</span></div>
         <p className="stats__src">
           Read live from <a href={`${EXPLORER}/address/${CONTRACT_ID}`} target="_blank" rel="noreferrer">{CONTRACT_ID}</a>
         </p>
@@ -111,7 +113,8 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
         <ol className="steps">
           <li>
             <strong>Start a circle.</strong>
-            Pick the amount, how often everyone pays (hourly, daily, weekly or monthly) and how many people, from 2 to 20.
+            Choose to save in a dollar stablecoin or NEAR, then pick the amount, how often everyone pays (hourly,
+            daily, weekly or monthly) and how many people, from 2 to 20.
           </li>
           <li>
             <strong>Invite and lock deposits.</strong>
@@ -125,7 +128,8 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
           </li>
           <li>
             <strong>Pay each round.</strong>
-            Every member pays before the deadline. The moment the last payment lands, the whole pot is sent to that
+            Every member pays before the deadline, with whichever token they hold. Iya Ajo and calendar, WhatsApp
+            or SMS reminders keep everyone on time. The moment the last payment lands, the whole pot is sent to that
             round's member automatically.
           </li>
           <li>
@@ -140,8 +144,8 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
         <div className="section__head">
           <h2>A worked example</h2>
           <p className="lede">
-            Five traders in Ikeja save 10 NEAR every week. Each locks a 10 NEAR deposit when they join, and the
-            contract draws the order: Ada, Bayo, Chika, Dayo, Efe.
+            Five traders in Ikeja save 10 dollars every week in tUSDC. Each locks a 10 tUSDC deposit when they join,
+            and the contract draws the order: Ada, Bayo, Chika, Dayo, Efe.
           </p>
         </div>
         <div className="table-wrap">
@@ -150,16 +154,16 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
               <tr><th scope="col">Week</th><th scope="col">Everyone pays</th><th scope="col">Collects</th><th scope="col">Payout</th><th scope="col">What happened</th></tr>
             </thead>
             <tbody>
-              <tr><td data-label="Week">1</td><td data-label="Everyone pays">10 NEAR each</td><td data-label="Collects">Ada</td><td data-label="Payout">50 NEAR</td><td data-label="What happened">All five paid on time.</td></tr>
-              <tr><td data-label="Week">2</td><td data-label="Everyone pays">10 NEAR each</td><td data-label="Collects">Bayo</td><td data-label="Payout">50 NEAR</td><td data-label="What happened">All five paid on time.</td></tr>
-              <tr className="table__alert"><td data-label="Week">3</td><td data-label="Everyone pays">Dayo misses</td><td data-label="Collects">Chika</td><td data-label="Payout">50 NEAR</td><td data-label="What happened">After the deadline, the round is settled. Dayo's 10 NEAR comes from his deposit, so Chika still gets the full pot.</td></tr>
-              <tr><td data-label="Week">4</td><td data-label="Everyone pays">10 NEAR each</td><td data-label="Collects">Dayo</td><td data-label="Payout">50 NEAR</td><td data-label="What happened">Dayo pays again and collects on his turn.</td></tr>
-              <tr><td data-label="Week">5</td><td data-label="Everyone pays">10 NEAR each</td><td data-label="Collects">Efe</td><td data-label="Payout">50 NEAR</td><td data-label="What happened">Circle complete. Four deposits come back in full; Dayo's is already used.</td></tr>
+              <tr><td data-label="Week">1</td><td data-label="Everyone pays">10 tUSDC each</td><td data-label="Collects">Ada</td><td data-label="Payout">50 tUSDC</td><td data-label="What happened">All five paid on time.</td></tr>
+              <tr><td data-label="Week">2</td><td data-label="Everyone pays">10 tUSDC each</td><td data-label="Collects">Bayo</td><td data-label="Payout">50 tUSDC</td><td data-label="What happened">All five paid on time.</td></tr>
+              <tr className="table__alert"><td data-label="Week">3</td><td data-label="Everyone pays">Dayo misses</td><td data-label="Collects">Chika</td><td data-label="Payout">50 tUSDC</td><td data-label="What happened">After the deadline, the round is settled. Dayo's 10 tUSDC comes from his deposit, so Chika still gets the full pot.</td></tr>
+              <tr><td data-label="Week">4</td><td data-label="Everyone pays">10 tUSDC each</td><td data-label="Collects">Dayo</td><td data-label="Payout">50 tUSDC</td><td data-label="What happened">Dayo pays again and collects on his turn.</td></tr>
+              <tr><td data-label="Week">5</td><td data-label="Everyone pays">10 tUSDC each</td><td data-label="Collects">Efe</td><td data-label="Payout">50 tUSDC</td><td data-label="What happened">Circle complete. Four deposits come back in full; Dayo's is already used.</td></tr>
             </tbody>
           </table>
         </div>
         <p className="example__foot">
-          Everyone put in 50 NEAR and took out 50 NEAR, and the person collecting was never short. Dayo's record now
+          Everyone put in 50 tUSDC and took out 50 tUSDC, and the person collecting was never short. Dayo's record now
           shows 4 on-time payments and 1 missed, a trust score of 80.
         </p>
       </section>
@@ -176,8 +180,33 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
           <div><dt>Trust scores</dt><dd>On-time and missed payments are recorded per account across every circle. Circle creators can require a minimum score, from 50 up to 100.</dd></div>
           <div><dt>Invite by link</dt><dd>Every circle has its own page. Copy the link or share it straight to WhatsApp or X, and people join from their wallet in a few taps.</dd></div>
           <div><dt>A public record</dt><dd>Every payment and payout is a NEAR transaction you can look up. The circle page shows who has paid this round, who has collected, and when.</dd></div>
+          <div><dt>Save in dollars or NEAR</dt><dd>Each circle runs in one currency: a dollar stablecoin (tUSDC or tUSDT on testnet) or NEAR. Payouts and refunds always come back in the circle's currency.</dd></div>
+          <div><dt>Pay with any token</dt><dd>Hold a different token? Pay a tUSDC circle with tUSDT or NEAR. It's converted and paid in the same transaction, so you sign once.</dd></div>
+          <div><dt>Iya Ajo, your circle's helper</dt><dd>Ask "when is my turn?", "who hasn't paid?" or "what if I miss?" and get an answer read from the circle's live record.</dd></div>
+          <div><dt>Reminders before payment day</dt><dd>Add every payment date to your calendar with an alarm, or send the group a reminder on WhatsApp or by SMS with one tap. It lists who still has to pay.</dd></div>
           <div><dt>Works with NEAR wallets</dt><dd>Connect with Meteor, HOT, Intear, MyNearWallet and other NEAR wallets. No sign-up or email needed.</dd></div>
+          <div><dt>Free test tokens built in</dt><dd>Get 100 tUSDC or tUSDT from the site with one click, so anyone can try a full circle without buying anything.</dd></div>
         </dl>
+      </section>
+
+      <section className="section stable" id="stablecoins">
+        <div className="section__head">
+          <h2>Save in dollars, pay with what you hold</h2>
+          <p className="lede">
+            Savings that swing with a token price aren't savings. So circles can run in a dollar stablecoin, and
+            every member can still pay with whatever they have.
+          </p>
+        </div>
+        <ol className="stable__flow">
+          <li><strong>Pick the circle's currency</strong>tUSDC, tUSDT or NEAR. Deposits, payments and payouts all stay in it.</li>
+          <li><strong>Pay with any of the three</strong>Paying a tUSDC circle with tUSDT swaps it 1:1. Paying with NEAR buys tUSDC at a fixed test rate of 1 NEAR = {TEST_RATE} tUSDC.</li>
+          <li><strong>One signature</strong>The conversion and the payment happen in one transaction. If the circle refuses it, the tokens come straight back.</li>
+        </ol>
+        <p className="stable__note">
+          On testnet, tUSDC (<a href={`${EXPLORER}/address/${USDC_ID}`} target="_blank" rel="noreferrer">{USDC_ID}</a>) and
+          tUSDT (<a href={`${EXPLORER}/address/${USDT_ID}`} target="_blank" rel="noreferrer">{USDT_ID}</a>) are this
+          project's own open-source test stablecoins with a free faucet. They behave like any NEP-141 token and have no value.
+        </p>
       </section>
 
       <section className="section" id="compare">
@@ -190,10 +219,12 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
               <tr><th scope="col"></th><th scope="col">Collector-run ajo</th><th scope="col">Ajo on NEAR</th></tr>
             </thead>
             <tbody>
+              <tr><th scope="row">Currency</th><td data-label="Collector-run ajo">Cash, losing value to inflation</td><td data-label="Ajo on NEAR">A dollar stablecoin or NEAR, paid with any of them</td></tr>
               <tr><th scope="row">Who holds the money</th><td data-label="Collector-run ajo">One person</td><td data-label="Ajo on NEAR">A public contract that can only pay the next member</td></tr>
               <tr><th scope="row">Who decides the order</th><td data-label="Collector-run ajo">The collector or the group</td><td data-label="Ajo on NEAR">Drawn at random on-chain when the circle fills</td></tr>
               <tr><th scope="row">If someone misses a payment</th><td data-label="Collector-run ajo">The person collecting is short</td><td data-label="Ajo on NEAR">Their deposit covers it and the miss is recorded</td></tr>
               <tr><th scope="row">Records</th><td data-label="Collector-run ajo">A notebook or group chat</td><td data-label="Ajo on NEAR">Every payment visible on NEAR</td></tr>
+              <tr><th scope="row">Reminders and questions</th><td data-label="Collector-run ajo">The collector chases everyone</td><td data-label="Ajo on NEAR">Calendar, WhatsApp and SMS reminders, and Iya Ajo answers questions</td></tr>
               <tr><th scope="row">Joining strangers</th><td data-label="Collector-run ajo">Trust a referral</td><td data-label="Ajo on NEAR">Check their trust score, or set a minimum</td></tr>
               <tr><th scope="row">Collector's fee</th><td data-label="Collector-run ajo">Often one member's share</td><td data-label="Ajo on NEAR">None; only NEAR network fees, fractions of a cent</td></tr>
             </tbody>
@@ -228,11 +259,23 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
         <div className="faq__list">
           <details>
             <summary>Is this real money?</summary>
-            <p>Not yet. Ajo on NEAR runs on NEAR testnet, where tokens are free and have no value. That makes it safe to try every step, including missing a payment. Mainnet and stablecoins are next on the roadmap.</p>
+            <p>No. Ajo on NEAR runs on NEAR testnet, where test NEAR, tUSDC and tUSDT are free and have no value. That makes it safe to try every step, including missing a payment.</p>
           </details>
           <details>
             <summary>What do I need to start?</summary>
-            <p>A NEAR testnet wallet such as Meteor Wallet, switched to testnet, and a little test NEAR from a faucet. Then click Connect wallet.</p>
+            <p>A NEAR testnet wallet such as Meteor Wallet, switched to testnet, and a little test NEAR from a faucet for network fees. Then click Connect wallet, and use the Get 100 tUSDC button for test dollars.</p>
+          </details>
+          <details>
+            <summary>How does paying with a different token work?</summary>
+            <p>For a tUSDC circle you can pay with tUSDC, tUSDT or NEAR. tUSDT is swapped 1:1; NEAR is converted at a fixed test rate of 1 NEAR = {TEST_RATE} tUSDC. The site sends the conversion and the payment as one transaction, and the circle only ever receives its own currency.</p>
+          </details>
+          <details>
+            <summary>Who is Iya Ajo?</summary>
+            <p>The helper on every circle page. In Yoruba, "Iya Ajo" is the woman who traditionally keeps a savings circle. Ours never holds money: it reads the circle's record from the contract and answers questions like when your turn is, who still has to pay, and when the deadline is.</p>
+          </details>
+          <details>
+            <summary>How do reminders work?</summary>
+            <p>On a running circle, Add to calendar downloads a calendar file with every remaining payment date and an alarm before each one. Remind on WhatsApp and Remind by SMS open a message to your group with the amount, the deadline and who still has to pay.</p>
           </details>
           <details>
             <summary>Can the person who starts a circle take the money?</summary>
@@ -248,23 +291,13 @@ export function Landing({ circles, children }: { circles: Circle[] | null; child
           </details>
           <details>
             <summary>What does it cost?</summary>
-            <p>There's no fee for using Ajo. Each payment is a NEAR transaction, which costs a tiny network fee, well under a cent.</p>
+            <p>There's no fee for using Ajo. Each payment is a NEAR transaction, which costs a tiny network fee in NEAR, well under a cent, even when you pay in a stablecoin.</p>
           </details>
           <details>
             <summary>Can I check the code?</summary>
             <p>Yes. The contract and this website are open source on <a href="https://github.com/HATWHY4041/ajo-on-near" target="_blank" rel="noreferrer">GitHub</a>, with tests for every rule above.</p>
           </details>
         </div>
-      </section>
-
-      <section className="section roadmap" id="roadmap">
-        <div className="section__head"><h2>What's next</h2></div>
-        <ul className="roadmap__list">
-          <li className="is-done"><strong>Now</strong> Circles, deposits, automatic payouts, missed-payment cover, trust scores and invite links, live on testnet.</li>
-          <li><strong>Next</strong> Pay in any token. NEAR Intents converts whatever a member holds, so circles can save in a stablecoin like USDC.</li>
-          <li><strong>Next</strong> Iya Ajo, an assistant that reminds members before payment day and answers questions like "when is my turn?"</li>
-          <li><strong>Later</strong> Mainnet launch, reminders by SMS and WhatsApp, and larger deposits for circles of strangers.</li>
-        </ul>
       </section>
 
       <section className="cta">
