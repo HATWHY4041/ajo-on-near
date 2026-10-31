@@ -5,6 +5,9 @@
 //! - `buy_with_near()`: attach NEAR and receive tokens at a fixed test rate.
 //! - Partner swap: sending the partner stablecoin here with `ft_transfer_call`
 //!   mints the same amount of this token to the sender (1:1).
+//! - Both conversions can forward the result straight on with
+//!   `ft_transfer_call`, so "pay a tUSDC circle with NEAR or tUSDT" is one
+//!   transaction for the member.
 //!
 //! Accounts never need a storage deposit; the contract covers storage. This keeps
 //! the testnet experience to one click. None of this is meant for real money.
@@ -13,13 +16,13 @@ use near_sdk::json_types::U128;
 use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::store::LookupMap;
 use near_sdk::{
-    env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
+    env, near, require, AccountId, BorshStorageKey, Gas, GasWeight, NearToken, PanicOnDefault, Promise,
     PromiseOrValue,
 };
 
 const FAUCET_COOLDOWN_NS: u64 = 3_600_000_000_000; // one hour
 const GAS_FOR_RESOLVE: Gas = Gas::from_tgas(10);
-const GAS_FOR_CALL_OVERHEAD: Gas = Gas::from_tgas(25);
+const GAS_FOR_ON_TRANSFER_MIN: Gas = Gas::from_tgas(5);
 const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
 
 #[near(serializers = [borsh])]
@@ -39,6 +42,14 @@ pub struct Metadata {
     pub reference: Option<String>,
     pub reference_hash: Option<String>,
     pub decimals: u8,
+}
+
+#[derive(Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+struct Forward {
+    receiver_id: AccountId,
+    #[serde(default)]
+    msg: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -104,15 +115,23 @@ impl Token {
         U128(amount)
     }
 
-    /// Attach NEAR and receive tokens at the fixed test rate.
+    /// Attach NEAR and receive tokens at the fixed test rate. With
+    /// `receiver_id`, `forward_amount` (default: everything bought) is then sent
+    /// on with `ft_transfer_call` and `msg`.
     #[payable]
-    pub fn buy_with_near(&mut self) -> U128 {
+    pub fn buy_with_near(&mut self, receiver_id: Option<AccountId>, forward_amount: Option<U128>, msg: Option<String>) -> U128 {
         let near = env::attached_deposit().as_yoctonear();
         require!(near > 0, "Attach some NEAR");
         let amount = near * self.near_rate / ONE_NEAR;
         require!(amount > 0, "Too little NEAR for one token unit");
         let who = env::predecessor_account_id();
         self.mint(&who, amount, "bought with NEAR at test rate");
+        if let Some(to) = receiver_id {
+            let fwd = forward_amount.map(|a| a.0).unwrap_or(amount);
+            require!(fwd <= amount, "Forward amount is more than was bought");
+            self.move_tokens(&who, &to, fwd, None);
+            self.transfer_call(who, to, fwd, msg.unwrap_or_default()).detach();
+        }
         U128(amount)
     }
 
@@ -143,13 +162,19 @@ impl Token {
         require!(env::attached_deposit() == NearToken::from_yoctonear(1), "Requires attached deposit of exactly 1 yoctoNEAR");
         let sender = env::predecessor_account_id();
         self.move_tokens(&sender, &receiver_id, amount.0, memo);
-        let gas = env::prepaid_gas().saturating_sub(env::used_gas()).saturating_sub(GAS_FOR_CALL_OVERHEAD);
+        self.transfer_call(sender, receiver_id, amount.0, msg).into()
+    }
+
+    fn transfer_call(&mut self, sender: AccountId, receiver_id: AccountId, amount: u128, msg: String) -> Promise {
+        let amount = U128(amount);
+        // The receiver gets a small fixed amount plus all gas left over.
         Promise::new(receiver_id.clone())
-            .function_call(
+            .function_call_weight(
                 "ft_on_transfer",
                 near_sdk::serde_json::json!({ "sender_id": sender, "amount": amount, "msg": msg }).to_string().into_bytes(),
                 NearToken::from_yoctonear(0),
-                gas,
+                GAS_FOR_ON_TRANSFER_MIN,
+                GasWeight(1),
             )
             .then(
                 Promise::new(env::current_account_id()).function_call(
@@ -159,7 +184,6 @@ impl Token {
                     GAS_FOR_RESOLVE,
                 ),
             )
-            .into()
     }
 
     /// Refunds whatever the receiver did not use. Returns the amount actually used.
@@ -183,12 +207,17 @@ impl Token {
         amount
     }
 
-    /// Receiving the partner stablecoin swaps it 1:1 into this token.
+    /// Receiving the partner stablecoin swaps it 1:1 into this token. If `msg`
+    /// is `{"receiver_id": "...", "msg": "..."}`, the swapped tokens are sent on
+    /// with `ft_transfer_call` in the same transaction.
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
-        let _ = msg;
         let from = env::predecessor_account_id();
         require!(Some(from) == self.partner, "Only the partner stablecoin can be swapped here");
         self.mint(&sender_id, amount.0, "swapped 1:1 from partner stablecoin");
+        if let Ok(fwd) = near_sdk::serde_json::from_str::<Forward>(&msg) {
+            self.move_tokens(&sender_id, &fwd.receiver_id, amount.0, None);
+            self.transfer_call(sender_id, fwd.receiver_id, amount.0, fwd.msg).detach();
+        }
         PromiseOrValue::Value(U128(0))
     }
 
@@ -293,9 +322,27 @@ mod tests {
     fn buy_with_near_uses_test_rate() {
         let mut t = token();
         ctx("ada.testnet", 4 * ONE_NEAR, 1);
-        assert_eq!(t.buy_with_near().0, 10_000_000); // 4 NEAR -> 10 tUSDC at 2.5
+        assert_eq!(t.buy_with_near(None, None, None).0, 10_000_000); // 4 NEAR -> 10 tUSDC at 2.5
         let need = t.near_for(U128(10_000_000)).0;
         assert_eq!(need, 4 * ONE_NEAR);
+    }
+
+    #[test]
+    fn buy_and_forward_moves_tokens_to_receiver() {
+        let mut t = token();
+        ctx("ada.testnet", 4 * ONE_NEAR, 1);
+        t.buy_with_near(Some(acc("ajo.testnet")), Some(U128(10_000_000)), Some("{}".into()));
+        assert_eq!(t.ft_balance_of(acc("ajo.testnet")).0, 10_000_000);
+        assert_eq!(t.ft_balance_of(acc("ada.testnet")).0, 0);
+    }
+
+    #[test]
+    fn swap_and_forward_moves_tokens_to_receiver() {
+        let mut t = token();
+        ctx("usdt.testnet", 0, 1);
+        let _ = t.ft_on_transfer(acc("ada.testnet"), U128(5_000_000), r#"{"receiver_id":"ajo.testnet","msg":"{}"}"#.into());
+        assert_eq!(t.ft_balance_of(acc("ajo.testnet")).0, 5_000_000);
+        assert_eq!(t.ft_balance_of(acc("ada.testnet")).0, 0);
     }
 
     #[test]
