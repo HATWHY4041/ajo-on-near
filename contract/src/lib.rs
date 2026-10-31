@@ -15,11 +15,18 @@
 //! 5. After the last round, every member gets back what is left of their
 //!    deposit, and each member's trust record (on-time and missed payments,
 //!    circles completed) is updated. Circles can require a minimum trust score.
+//!
+//! Currency: a circle runs in NEAR or in an allowed NEP-141 stablecoin (on
+//! testnet: the project's own tUSDC / tUSDT test tokens). Stablecoin circles are
+//! created, joined and paid with `ft_transfer_call`, and every payout and
+//! refund goes back out with `ft_transfer`.
 
 use near_sdk::json_types::U128;
+use near_sdk::serde::Deserialize;
 use near_sdk::store::{LookupMap, Vector};
 use near_sdk::{
-    env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
+    env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
+    PromiseOrValue,
 };
 
 pub const MIN_MEMBERS: u32 = 2;
@@ -28,6 +35,7 @@ pub const MAX_PERIOD_MINUTES: u32 = 60 * 24 * 31;
 pub const MAX_NAME_LEN: usize = 64;
 const NS_PER_MS: u64 = 1_000_000;
 const MS_PER_MINUTE: u64 = 60_000;
+const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(5);
 
 #[near(serializers = [borsh])]
 #[derive(BorshStorageKey)]
@@ -95,6 +103,8 @@ pub struct Circle {
     pub pot: U128,
     pub history: Vec<RoundRecord>,
     pub created_at_ms: u64,
+    /// The NEP-141 token this circle runs in. `None` = NEAR.
+    pub token: Option<AccountId>,
 }
 
 #[near(serializers = [borsh, json])]
@@ -132,6 +142,59 @@ impl TrustRecord {
 pub struct Contract {
     circles: Vector<Circle>,
     trust: LookupMap<AccountId, TrustRecord>,
+    owner: AccountId,
+    /// Stablecoins circles may run in.
+    allowed_tokens: Vec<AccountId>,
+}
+
+/// Layout of the first deployed version, kept for `migrate`.
+#[near(serializers = [borsh])]
+pub struct OldCircle {
+    pub id: u32,
+    pub name: String,
+    pub creator: AccountId,
+    pub contribution: U128,
+    pub deposit: U128,
+    pub max_members: u32,
+    pub period_minutes: u32,
+    pub min_trust_score: u32,
+    pub members: Vec<Member>,
+    pub status: CircleStatus,
+    pub current_round: u32,
+    pub round_deadline_ms: u64,
+    pub pot: U128,
+    pub history: Vec<RoundRecord>,
+    pub created_at_ms: u64,
+}
+
+#[near(serializers = [borsh])]
+pub struct OldContract {
+    circles: Vector<OldCircle>,
+    trust: LookupMap<AccountId, TrustRecord>,
+}
+
+/// What `ft_on_transfer` expects in `msg`.
+#[derive(Deserialize)]
+#[serde(crate = "near_sdk::serde", tag = "action", rename_all = "snake_case")]
+pub enum FtAction {
+    Create {
+        name: String,
+        max_members: u32,
+        period_minutes: u32,
+        min_trust_score: Option<u32>,
+    },
+    Join {
+        circle_id: u32,
+    },
+    Contribute {
+        circle_id: u32,
+    },
+}
+
+#[near(serializers = [json])]
+pub struct Config {
+    pub owner: AccountId,
+    pub allowed_tokens: Vec<AccountId>,
 }
 
 fn block_ms() -> u64 {
@@ -145,11 +208,32 @@ fn emit(event: &str, data: String) {
     ));
 }
 
-fn transfer(to: &AccountId, yocto: u128) {
-    if yocto > 0 {
-        Promise::new(to.clone())
-            .transfer(NearToken::from_yoctonear(yocto))
-            .detach();
+/// Send `amount` of the circle's currency: NEAR, or a NEP-141 token.
+fn transfer(token: &Option<AccountId>, to: &AccountId, amount: u128) {
+    if amount == 0 {
+        return;
+    }
+    match token {
+        None => Promise::new(to.clone())
+            .transfer(NearToken::from_yoctonear(amount))
+            .detach(),
+        Some(t) => Promise::new(t.clone())
+            .function_call(
+                "ft_transfer",
+                near_sdk::serde_json::json!({ "receiver_id": to, "amount": U128(amount), "memo": "Ajo on NEAR" })
+                    .to_string()
+                    .into_bytes(),
+                NearToken::from_yoctonear(1),
+                GAS_FOR_FT_TRANSFER,
+            )
+            .detach(),
+    }
+}
+
+fn token_json(token: &Option<AccountId>) -> String {
+    match token {
+        None => "null".into(),
+        Some(t) => format!("\"{}\"", t),
     }
 }
 
@@ -160,7 +244,62 @@ impl Contract {
         Self {
             circles: Vector::new(StorageKey::Circles),
             trust: LookupMap::new(StorageKey::Trust),
+            owner: env::predecessor_account_id(),
+            allowed_tokens: vec![],
         }
+    }
+
+    /// Upgrade from the first version: keeps every circle and trust record,
+    /// marks existing circles as NEAR circles, and sets the allowed tokens.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate(allowed_tokens: Vec<AccountId>) -> Self {
+        let old: OldContract = env::state_read().unwrap_or_else(|| env::panic_str("No state to migrate"));
+        let OldContract { circles: old_circles, trust } = old;
+        let all: Vec<OldCircle> = (0..old_circles.len())
+            .filter_map(|i| old_circles.get(i).map(|c| OldCircle {
+                id: c.id, name: c.name.clone(), creator: c.creator.clone(), contribution: c.contribution,
+                deposit: c.deposit, max_members: c.max_members, period_minutes: c.period_minutes,
+                min_trust_score: c.min_trust_score, members: c.members.clone(), status: c.status.clone(),
+                current_round: c.current_round, round_deadline_ms: c.round_deadline_ms, pot: c.pot,
+                history: c.history.clone(), created_at_ms: c.created_at_ms,
+            }))
+            .collect();
+        drop(old_circles);
+        let mut circles: Vector<Circle> = Vector::new(StorageKey::Circles);
+        for c in all {
+            circles.push(Circle {
+                id: c.id, name: c.name, creator: c.creator, contribution: c.contribution,
+                deposit: c.deposit, max_members: c.max_members, period_minutes: c.period_minutes,
+                min_trust_score: c.min_trust_score, members: c.members, status: c.status,
+                current_round: c.current_round, round_deadline_ms: c.round_deadline_ms, pot: c.pot,
+                history: c.history, created_at_ms: c.created_at_ms, token: None,
+            });
+        }
+        Self { circles, trust, owner: env::current_account_id(), allowed_tokens }
+    }
+
+    pub fn set_allowed_tokens(&mut self, tokens: Vec<AccountId>) {
+        require!(env::predecessor_account_id() == self.owner, "Only the owner");
+        self.allowed_tokens = tokens;
+    }
+
+    /// Stablecoin entry point. Send the exact amount with `ft_transfer_call`
+    /// and a `msg` such as `{"action":"contribute","circle_id":3}`.
+    pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128, msg: String) -> PromiseOrValue<U128> {
+        let token = env::predecessor_account_id();
+        require!(self.allowed_tokens.contains(&token), "This token is not accepted");
+        let action: FtAction = near_sdk::serde_json::from_str(&msg)
+            .unwrap_or_else(|_| env::panic_str("Invalid msg: expected {\"action\":\"create|join|contribute\", ...}"));
+        let token = Some(token);
+        match action {
+            FtAction::Create { name, max_members, period_minutes, min_trust_score } => {
+                self.internal_create(sender_id, amount.0, token, name, amount, max_members, period_minutes, min_trust_score);
+            }
+            FtAction::Join { circle_id } => self.internal_join(sender_id, amount.0, token, circle_id),
+            FtAction::Contribute { circle_id } => self.internal_contribute(sender_id, amount.0, token, circle_id),
+        }
+        PromiseOrValue::Value(U128(0))
     }
 
     // ---------------------------------------------------------------- calls
@@ -170,6 +309,41 @@ impl Contract {
     #[payable]
     pub fn create_circle(
         &mut self,
+        name: String,
+        contribution: U128,
+        max_members: u32,
+        period_minutes: u32,
+        min_trust_score: Option<u32>,
+    ) -> u32 {
+        let who = env::predecessor_account_id();
+        let paid = env::attached_deposit().as_yoctonear();
+        self.internal_create(who, paid, None, name, contribution, max_members, period_minutes, min_trust_score)
+    }
+
+    /// Join an open circle. Attach exactly the circle's `deposit`.
+    /// The circle starts automatically when the last seat is taken.
+    #[payable]
+    pub fn join_circle(&mut self, circle_id: u32) {
+        let who = env::predecessor_account_id();
+        let paid = env::attached_deposit().as_yoctonear();
+        self.internal_join(who, paid, None, circle_id);
+    }
+
+    /// Pay this round's contribution. Attach exactly the circle's `contribution`.
+    /// If you are the last to pay, the pot goes to this round's recipient now.
+    #[payable]
+    pub fn contribute(&mut self, circle_id: u32) {
+        let who = env::predecessor_account_id();
+        let paid = env::attached_deposit().as_yoctonear();
+        self.internal_contribute(who, paid, None, circle_id);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn internal_create(
+        &mut self,
+        creator: AccountId,
+        paid: u128,
+        token: Option<AccountId>,
         name: String,
         contribution: U128,
         max_members: u32,
@@ -191,11 +365,10 @@ impl Contract {
         let min_trust_score = min_trust_score.unwrap_or(0);
         require!(min_trust_score <= 100, "Minimum trust score must be 0-100");
         require!(
-            env::attached_deposit().as_yoctonear() == contribution.0,
+            paid == contribution.0,
             "Attach exactly one contribution as your security deposit"
         );
 
-        let creator = env::predecessor_account_id();
         let id = self.circles.len();
         let circle = Circle {
             id,
@@ -213,24 +386,22 @@ impl Contract {
             pot: U128(0),
             history: vec![],
             created_at_ms: block_ms(),
+            token: token.clone(),
         };
         self.circles.push(circle);
         emit(
             "circle_created",
             format!(
-                "{{\"circle_id\":{},\"creator\":\"{}\",\"contribution\":\"{}\",\"max_members\":{}}}",
-                id, creator, contribution.0, max_members
+                "{{\"circle_id\":{},\"creator\":\"{}\",\"contribution\":\"{}\",\"max_members\":{},\"token\":{}}}",
+                id, creator, contribution.0, max_members, token_json(&token)
             ),
         );
         id
     }
 
-    /// Join an open circle. Attach exactly the circle's `deposit`.
-    /// The circle starts automatically when the last seat is taken.
-    #[payable]
-    pub fn join_circle(&mut self, circle_id: u32) {
+    fn internal_join(&mut self, who: AccountId, paid: u128, token: Option<AccountId>, circle_id: u32) {
         let mut c = self.load(circle_id);
-        let who = env::predecessor_account_id();
+        require!(c.token == token, "Pay in this circle's currency");
         require!(c.status == CircleStatus::Open, "Circle is not open for joining");
         require!(Self::index_of(&c, &who).is_none(), "Already a member");
         require!(
@@ -238,7 +409,7 @@ impl Contract {
             "Circle is full"
         );
         require!(
-            env::attached_deposit().as_yoctonear() == c.deposit.0,
+            paid == c.deposit.0,
             "Attach exactly the circle's security deposit"
         );
         if c.min_trust_score > 0 {
@@ -272,7 +443,7 @@ impl Contract {
         );
         let i = Self::index_of(&c, &who).unwrap_or_else(|| env::panic_str("Not a member"));
         let m = c.members.remove(i);
-        transfer(&who, m.deposit_left.0);
+        transfer(&c.token, &who, m.deposit_left.0);
         emit(
             "member_left",
             format!("{{\"circle_id\":{},\"account_id\":\"{}\"}}", circle_id, who),
@@ -280,12 +451,9 @@ impl Contract {
         self.save(c);
     }
 
-    /// Pay this round's contribution. Attach exactly the circle's `contribution`.
-    /// If you are the last to pay, the pot goes to this round's recipient now.
-    #[payable]
-    pub fn contribute(&mut self, circle_id: u32) {
+    fn internal_contribute(&mut self, who: AccountId, paid: u128, token: Option<AccountId>, circle_id: u32) {
         let mut c = self.load(circle_id);
-        let who = env::predecessor_account_id();
+        require!(c.token == token, "Pay in this circle's currency");
         require!(c.status == CircleStatus::Active, "Circle is not active");
         let i = Self::index_of(&c, &who).unwrap_or_else(|| env::panic_str("Not a member"));
         require!(!c.members[i].paid_this_round, "Already paid this round");
@@ -293,10 +461,7 @@ impl Contract {
             block_ms() <= c.round_deadline_ms,
             "This round's deadline has passed; call settle_round first"
         );
-        require!(
-            env::attached_deposit().as_yoctonear() == c.contribution.0,
-            "Attach exactly one contribution"
-        );
+        require!(paid == c.contribution.0, "Attach exactly one contribution");
         c.members[i].paid_this_round = true;
         c.members[i].on_time_payments += 1;
         c.pot = U128(c.pot.0 + c.contribution.0);
@@ -394,6 +559,10 @@ impl Contract {
         block_ms()
     }
 
+    pub fn get_config(&self) -> Config {
+        Config { owner: self.owner.clone(), allowed_tokens: self.allowed_tokens.clone() }
+    }
+
     // ------------------------------------------------------------- internal
 
     fn new_member(account_id: &AccountId, deposit: u128) -> Member {
@@ -455,7 +624,7 @@ impl Contract {
         let r = c.current_round as usize;
         let recipient = c.members[r].account_id.clone();
         let amount = c.pot.0;
-        transfer(&recipient, amount);
+        transfer(&c.token, &recipient, amount);
         c.members[r].received_payout = true;
         c.history.push(RoundRecord {
             round: c.current_round + 1,
@@ -484,7 +653,7 @@ impl Contract {
             c.status = CircleStatus::Completed;
             c.round_deadline_ms = 0;
             for m in &c.members {
-                transfer(&m.account_id, m.deposit_left.0);
+                transfer(&c.token, &m.account_id, m.deposit_left.0);
                 let mut t = self.trust.get(&m.account_id).cloned().unwrap_or_default();
                 t.circles_completed += 1;
                 t.on_time_payments += m.on_time_payments;

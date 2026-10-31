@@ -273,3 +273,111 @@ fn views_list_circles() {
     assert!(c.get_circles_for(acc("nobody")).is_empty());
     assert_eq!(c.get_trust(acc("nobody")).score, 0);
 }
+
+// ------------------------------------------------------------ stablecoin circles
+
+const USDC: u128 = 1_000_000; // 1 tUSDC (6 decimals)
+
+fn token_ctx(token: &str, time_ns: u64) {
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id(token.parse().unwrap()).block_timestamp(time_ns);
+    testing_env!(b.build());
+}
+
+fn ft(c: &mut Contract, token: &str, from: &str, amount: u128, msg: &str, t: u64) {
+    token_ctx(token, t);
+    let _ = c.ft_on_transfer(acc(from), U128(amount), msg.to_string());
+}
+
+fn usdc_circle() -> (Contract, u32) {
+    ctx("ajo", 0, 0);
+    let mut c = Contract::new();
+    c.set_allowed_tokens(vec!["usdc.testnet".parse().unwrap(), "usdt.testnet".parse().unwrap()]);
+    ft(&mut c, "usdc.testnet", "ada", 10 * USDC,
+        r#"{"action":"create","name":"Dollar circle","max_members":2,"period_minutes":60}"#, 0);
+    (c, 0)
+}
+
+#[test]
+fn stablecoin_circle_runs_end_to_end() {
+    let (mut c, id) = usdc_circle();
+    let circle = c.get_circle(id).unwrap();
+    assert_eq!(circle.token.as_ref().unwrap().as_str(), "usdc.testnet");
+    assert_eq!(circle.contribution.0, 10 * USDC);
+    ft(&mut c, "usdc.testnet", "bayo", 10 * USDC, r#"{"action":"join","circle_id":0}"#, 1);
+    assert_eq!(c.get_circle(id).unwrap().status, CircleStatus::Active);
+    let members: Vec<String> = c.get_circle(id).unwrap().members.iter().map(|m| m.account_id.to_string()).collect();
+    for (k, m) in members.iter().enumerate() {
+        ft(&mut c, "usdc.testnet", &m.replace(".testnet", ""), 10 * USDC,
+            r#"{"action":"contribute","circle_id":0}"#, 2 + k as u64);
+    }
+    let circle = c.get_circle(id).unwrap();
+    assert_eq!(circle.history.len(), 1);
+    assert_eq!(circle.history[0].amount.0, 20 * USDC);
+    assert!(get_logs().iter().any(|l| l.contains("\"event\":\"payout\"")));
+}
+
+#[test]
+#[should_panic(expected = "Pay in this circle's currency")]
+fn stablecoin_circle_rejects_other_token() {
+    let (mut c, _) = usdc_circle();
+    ft(&mut c, "usdt.testnet", "bayo", 10 * USDC, r#"{"action":"join","circle_id":0}"#, 1);
+}
+
+#[test]
+#[should_panic(expected = "Pay in this circle's currency")]
+fn stablecoin_circle_rejects_near() {
+    let (mut c, _) = usdc_circle();
+    ctx("bayo", 10 * USDC, 1);
+    c.join_circle(0);
+}
+
+#[test]
+#[should_panic(expected = "This token is not accepted")]
+fn unknown_token_is_rejected() {
+    let (mut c, _) = usdc_circle();
+    ft(&mut c, "fake.testnet", "bayo", 10 * USDC, r#"{"action":"join","circle_id":0}"#, 1);
+}
+
+#[test]
+#[should_panic(expected = "Attach exactly the circle's security deposit")]
+fn stablecoin_join_needs_exact_amount() {
+    let (mut c, _) = usdc_circle();
+    ft(&mut c, "usdc.testnet", "bayo", 9 * USDC, r#"{"action":"join","circle_id":0}"#, 1);
+}
+
+#[test]
+#[should_panic(expected = "Invalid msg")]
+fn bad_msg_is_rejected() {
+    let (mut c, _) = usdc_circle();
+    ft(&mut c, "usdc.testnet", "bayo", 10 * USDC, "hello", 1);
+}
+
+#[test]
+fn migrate_keeps_old_circles() {
+    ctx("ajo", 0, 0);
+    let mut old = OldContract {
+        circles: Vector::new(StorageKey::Circles),
+        trust: LookupMap::new(StorageKey::Trust),
+    };
+    old.circles.push(OldCircle {
+        id: 0, name: "Old circle".into(), creator: acc("ada"), contribution: U128(ONE), deposit: U128(ONE),
+        max_members: 3, period_minutes: 10, min_trust_score: 0,
+        members: vec![Contract::new_member(&acc("ada"), ONE)], status: CircleStatus::Open,
+        current_round: 0, round_deadline_ms: 0, pot: U128(0), history: vec![], created_at_ms: 5,
+    });
+    old.trust.insert(acc("ada"), TrustRecord { circles_completed: 1, on_time_payments: 4, missed_payments: 0 });
+    env::state_write(&old);
+    drop(old);
+    let mut c = Contract::migrate(vec!["usdc.testnet".parse().unwrap()]);
+    let circle = c.get_circle(0).unwrap();
+    assert_eq!(circle.name, "Old circle");
+    assert!(circle.token.is_none());
+    assert_eq!(c.get_trust(acc("ada")).score, 100);
+    assert_eq!(c.get_circle_count(), 1);
+    assert_eq!(c.get_config().allowed_tokens.len(), 1);
+    // the old circle still works as a NEAR circle
+    ctx("bayo", ONE, 10);
+    c.join_circle(0);
+    assert_eq!(c.get_circle(0).unwrap().members.len(), 2);
+}
