@@ -24,11 +24,16 @@ Ajo on NEAR replaces the human collector with a NEAR smart contract:
 
 | | |
 |---|---|
+| Web app | **https://ajo-on-near.vercel.app** (connect a testnet wallet such as Meteor) |
 | Contract | [`ajo-on-near.testnet`](https://testnet.nearblocks.io/address/ajo-on-near.testnet) |
 | Network | NEAR testnet |
 | Wasm sha256 | see [`contract/res/ajo_on_near.wasm.sha256`](contract/res/ajo_on_near.wasm.sha256) |
 
 ## Try it (for judges)
+
+**In the browser:** open https://ajo-on-near.vercel.app, click **Connect wallet** and pick a NEAR testnet wallet. Click **Start a circle**, choose 2 members and "Every 5 minutes", and create it. Open the circle page from a second testnet account and click **Join**: the ring fills, the payout order is shuffled, and a countdown starts. Each member clicks **Pay**; when the last one pays, the gold seat receives the pot and the next round begins.
+
+**From the command line:**
 
 All commands use the [NEAR CLI](https://docs.near.org/tools/near-cli). Amounts are in yoctoNEAR (1 NEAR = 10^24).
 
@@ -89,6 +94,7 @@ contract/          Rust smart contract (near-sdk 5.30)
   src/lib.rs       contract
   src/tests.rs     unit tests
   res/             wasm + ABI built by CI (cargo-near)
+web/               React + Vite web app (wallets via @hot-labs/near-connect)
 scripts/           deploy and end-to-end scripts (near-api-js)
 .github/workflows  CI: tests, builds wasm with cargo-near
 ```
@@ -97,6 +103,7 @@ scripts/           deploy and end-to-end scripts (near-api-js)
 
 - NEAR Protocol (testnet), [near-sdk-rs](https://github.com/near/near-sdk-rs) 5.30, [cargo-near](https://github.com/near/cargo-near)
 - [near-api-js](https://github.com/near/near-api-js) 7 for scripts
+- [NEAR Connect](https://github.com/hot-dao/near-selector) (`@hot-labs/near-connect`) for wallet login, React 19, Vite, hosted on Vercel
 - No templates or pre-hackathon code. Code was written with the help of an AI coding assistant (Claude).
 
 ## License
