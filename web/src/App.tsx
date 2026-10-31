@@ -123,7 +123,7 @@ export default function App() {
         {route.startsWith("#/new") ? (
           <CreateCircle account={account} signIn={signIn} setNotice={setNotice} onCreated={refresh} />
         ) : circleMatch ? (
-          <CircleDetail id={Number(circleMatch[1])} fresh={route.endsWith("/new")} account={account} signIn={signIn} setNotice={setNotice} onChanged={refresh} />
+          <CircleDetail key={circleMatch[1]} id={Number(circleMatch[1])} fresh={route.endsWith("/new")} account={account} signIn={signIn} setNotice={setNotice} onChanged={refresh} />
         ) : (
           <Landing circles={circles}>
             <CirclesSection circles={circles} loadError={loadError} account={account} />
