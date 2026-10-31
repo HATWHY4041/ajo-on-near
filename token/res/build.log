@@ -31,135 +31,159 @@ INFO: contract's near-sdk targets protocol version 88; rustc 1.99.1 accepted (bu
  │    Compiling serde_json v1.0.154
  │    Compiling toml_edit v0.25.17+spec-1.1.0
  │    Compiling serde_derive_internals v0.29.1
- │    Compiling schemars v0.8.22
  │    Compiling foldhash v0.2.0
  │    Compiling cfg_aliases v0.2.2
+ │    Compiling schemars v0.8.22
  │    Compiling borsh v1.8.1
  │    Compiling proc-macro-crate v3.5.0
  │    Compiling schemars_derive v0.8.22
+ │    Compiling crypto-common v0.2.2
  │    Compiling serde_derive v1.0.229
  │    Compiling block-buffer v0.12.1
- │    Compiling crypto-common v0.2.2
+ │    Compiling once_cell v1.21.4
  │    Compiling const-oid v0.10.2
  │    Compiling version_check v0.9.5
  │    Compiling dyn-clone v1.0.20
- │    Compiling once_cell v1.21.4
+ │    Compiling borsh-derive v1.8.1
  │    Compiling digest v0.11.3
  │    Compiling generic-array v0.14.9
- │    Compiling borsh-derive v1.8.1
  │    Compiling cfg-if v1.0.5
  │    Compiling strsim v0.11.1
  │    Compiling darling_core v0.24.1
  │    Compiling keccak v0.2.2
  │    Compiling sha3 v0.11.0
- │    Compiling fnv v1.0.7
  │    Compiling rustversion v1.0.23
+ │    Compiling fnv v1.0.7
  │    Compiling darling_core v0.20.11
  │    Compiling darling_macro v0.24.1
  │    Compiling darling v0.24.1
  │    Compiling serde_with_macros v3.24.0
  │    Compiling block-buffer v0.10.4
  │    Compiling crypto-common v0.1.6
- │    Compiling bs58 v0.5.1
  │    Compiling base64 v0.23.1
  │    Compiling hex v0.4.3
- │    Compiling serde_with v3.24.0
+ │    Compiling bs58 v0.5.1
  │    Compiling digest v0.10.7
+ │    Compiling serde_with v3.24.0
  │    Compiling darling_macro v0.20.11
+ │    Compiling near-gas v0.3.7
  │    Compiling near-token v0.3.6
  │    Compiling near-account-id v3.0.0
- │    Compiling near-gas v0.3.7
+ │    Compiling near-crypto-hash v0.2.0
  │    Compiling near-sdk-macros v5.30.0
+ │    Compiling base64 v0.22.1
  │    Compiling cpufeatures v0.3.1
  │    Compiling heck v0.5.0
- │    Compiling base64 v0.22.1
- │    Compiling near-crypto-hash v0.2.0
- │    Compiling strum_macros v0.26.4
  │    Compiling sha2 v0.11.1
+ │    Compiling strum_macros v0.26.4
  │    Compiling darling v0.20.11
  │    Compiling ripemd v0.1.3
- │    Compiling near-sdk-core v4.4.1
  │    Compiling near-digest v0.1.4
  │    Compiling digest-io v0.1.0
  │    Compiling cfg_eval v0.1.2
- │    Compiling semver v1.0.28
+ │    Compiling near-sdk-core v4.4.1
  │    Compiling strum v0.26.3
  │    Compiling Inflector v0.11.4
- │    Compiling near-global-contracts v0.3.2
+ │    Compiling semver v1.0.28
  │    Compiling near-sdk-env v0.1.8
- │    Compiling near-abi v0.4.5
  │    Compiling near-sys v0.4.0
+ │    Compiling near-global-contracts v0.3.2
+ │    Compiling near-abi v0.4.5
  │    Compiling hex-literal v1.1.0
  │    Compiling near-sdk v5.30.0
  │    Compiling ajo-test-token v0.1.0 (/home/runner/work/ajo-on-near/ajo-on-near/token)
- │ error[E0277]: the trait bound `StorageBalance: JsonSchema` is not satisfied
- │    --> src/lib.rs:238:106
- │     |
- │  83 | #[near]
- │     | ------- required by a bound introduced by this call
- │ ...
- │ 238 |     pub fn storage_deposit(&mut self, account_id: Option<AccountId>, registration_only: Option<bool>) -> StorageBalance {
- │     |                                                                                                          ^^^^^^^^^^^^^^ unsatisfied trait bound
- │     |
- │ help: the trait `JsonSchema` is not implemented for `StorageBalance`
- │    --> src/lib.rs:57:1
- │     |
- │  57 | pub struct StorageBalance {
- │     | ^^^^^^^^^^^^^^^^^^^^^^^^^
- │     = help: the following other types implement trait `JsonSchema`:
- │               &'a T
- │               &'a mut T
- │               ()
- │               (T0, T1)
- │               (T0, T1, T2)
- │               (T0, T1, T2, T3)
- │               (T0, T1, T2, T3, T4)
- │               (T0, T1, T2, T3, T4, T5)
- │             and 169 others
- │ note: required by a bound in `SchemaGenerator::subschema_for`
- │    --> /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-0.8.22/src/gen.rs:221:38
- │     |
- │ 221 |     pub fn subschema_for<T: ?Sized + JsonSchema>(&mut self) -> Schema {
- │     |                                      ^^^^^^^^^^ required by this bound in `SchemaGenerator::subschema_for`
- │ 
- │ error[E0277]: the trait bound `StorageBalance: JsonSchema` is not satisfied
- │    --> src/lib.rs:247:64
- │     |
- │  83 | #[near]
- │     | ------- required by a bound introduced by this call
- │ ...
- │ 247 |     pub fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
- │     |                                                                ^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
- │     |
- │ help: the trait `JsonSchema` is not implemented for `StorageBalance`
- │    --> src/lib.rs:57:1
- │     |
- │  57 | pub struct StorageBalance {
- │     | ^^^^^^^^^^^^^^^^^^^^^^^^^
- │     = help: the following other types implement trait `JsonSchema`:
- │               &'a T
- │               &'a mut T
- │               ()
- │               (T0, T1)
- │               (T0, T1, T2)
- │               (T0, T1, T2, T3)
- │               (T0, T1, T2, T3, T4)
- │               (T0, T1, T2, T3, T4, T5)
- │             and 169 others
- │     = note: required for `std::option::Option<StorageBalance>` to implement `JsonSchema`
- │ note: required by a bound in `SchemaGenerator::subschema_for`
- │    --> /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-0.8.22/src/gen.rs:221:38
- │     |
- │ 221 |     pub fn subschema_for<T: ?Sized + JsonSchema>(&mut self) -> Schema {
- │     |                                      ^^^^^^^^^^ required by this bound in `SchemaGenerator::subschema_for`
- │ 
- │ For more information about this error, try `rustc --explain E0277`.
- │ error: could not compile `ajo-test-token` (lib) due to 2 previous errors
+ │     Finished `dev` profile [unoptimized] target(s) in 11.41s
+• Extracting ABI...
+• done
+
+• Compressing ABI to be embedded..
+• done
+
+• Building contract
+ │    Compiling proc-macro2 v1.0.107
+ │    Compiling quote v1.0.47
+ │    Compiling unicode-ident v1.0.27
+ │    Compiling ident_case v1.0.1
+ │    Compiling serde_core v1.0.229
+ │    Compiling zmij v1.0.23
+ │    Compiling hashbrown v0.17.1
+ │    Compiling equivalent v1.0.3
+ │    Compiling winnow v1.0.4
+ │    Compiling toml_datetime v1.1.2+spec-1.1.0
+ │    Compiling indexmap v2.14.2
+ │    Compiling syn v3.0.9
+ │    Compiling syn v2.0.119
+ │    Compiling toml_parser v1.1.5+spec-1.1.0
+ │    Compiling toml_edit v0.25.17+spec-1.1.0
+ │    Compiling cfg_aliases v0.2.2
+ │    Compiling borsh v1.8.1
+ │    Compiling proc-macro-crate v3.5.0
+ │    Compiling once_cell v1.21.4
+ │    Compiling strsim v0.11.1
+ │    Compiling serde v1.0.229
+ │    Compiling typenum v1.20.1
+ │    Compiling proc-macro-error-attr3 v3.1.1
+ │    Compiling darling_core v0.24.1
+ │    Compiling hybrid-array v0.4.15
+ │    Compiling serde_json v1.0.154
+ │    Compiling serde_derive v1.0.229
+ │    Compiling borsh-derive v1.8.1
+ │    Compiling proc-macro-error3 v3.1.1
+ │    Compiling memchr v2.8.3
+ │    Compiling near-sys v0.4.0
+ │    Compiling foldhash v0.2.0
+ │    Compiling itoa v1.0.18
+ │    Compiling darling_macro v0.24.1
+ │    Compiling fnv v1.0.7
+ │    Compiling rustversion v1.0.23
+ │    Compiling darling_core v0.20.11
+ │    Compiling darling v0.24.1
+ │    Compiling serde_with_macros v3.24.0
+ │    Compiling near-sdk-env v0.1.8
+ │    Compiling impl-tools-lib v0.12.0
+ │    Compiling crypto-common v0.2.2
+ │    Compiling block-buffer v0.12.1
+ │    Compiling bs58 v0.5.1
+ │    Compiling hex v0.4.3
+ │    Compiling base64 v0.23.1
+ │    Compiling digest v0.11.3
+ │    Compiling serde_with v3.24.0
+ │    Compiling impl-tools v0.12.0
+ │    Compiling darling_macro v0.20.11
+ │    Compiling near-token v0.3.6
+ │    Compiling near-gas v0.3.7
+ │    Compiling near-account-id v3.0.0
+ │    Compiling near-crypto-hash v0.2.0
+ │    Compiling near-sdk-macros v5.30.0
+ │    Compiling heck v0.5.0
+ │    Compiling wee_alloc v0.4.5
+ │    Compiling base64 v0.22.1
+ │    Compiling strum_macros v0.26.4
+ │    Compiling darling v0.20.11
+ │    Compiling near-digest v0.1.4
+ │    Compiling near-sdk-core v4.4.1
+ │    Compiling cfg_eval v0.1.2
+ │    Compiling cfg-if v0.1.10
+ │    Compiling Inflector v0.11.4
+ │    Compiling strum v0.26.3
+ │    Compiling memory_units v0.4.0
+ │    Compiling near-global-contracts v0.3.2
+ │    Compiling hex-literal v1.1.0
+ │    Compiling near-sdk v5.30.0
+ │    Compiling ajo-test-token v0.1.0 (/home/runner/work/ajo-on-near/ajo-on-near/token)
+ │     Finished `release` profile [optimized] target(s) in 10.91s
+
+• Running an optimize for size post-step with wasm-opt --enable-nontrapping-float-to-int --enable-bulk-memory...
+    Finished wasm-opt -O in 500ms
+• done
+
+✓ Contract successfully built! (in CARGO_NEAR_BUILD_ENVIRONMENT=host)
+     -                Binary: /home/runner/work/ajo-on-near/ajo-on-near/token/target/near/ajo_test_token.wasm
+     -                  Size: 180.4 KB (180430 bytes)
+     - SHA-256 checksum hex : 6919b6e84de29fd3adeb0e3be58e8b871e9cdcb78ac6332d3c053872e22523c0
+     - SHA-256 checksum bs58: 85GYv9t69f9oGwJH3USgXNTdkNhySz8vyhTxQBXKuRiP
+     -                   ABI: /home/runner/work/ajo-on-near/ajo-on-near/token/target/near/ajo_test_token_abi.json
+     -          Embedded ABI: /home/runner/work/ajo-on-near/ajo-on-near/token/target/near/ajo_test_token_abi.zst
+    Finished cargo near build in 23s
 Here is the console command if you ever need to re-run it again:
 cargo near build non-reproducible-wasm
-
-Error: 
-   0: [91m`cd "/home/runner/work/ajo-on-near/ajo-on-near/token" && env -u CARGO_ENCODED_RUSTFLAGS CARGO_NEAR_ABI_GENERATION="true" CARGO_NEAR_ABI_SCHEMA_VERSION="0.4.0" CARGO_NEAR_VERSION="cargo-near-build 0.11.5" CARGO_PROFILE_DEV_DEBUG="0" CARGO_PROFILE_DEV_LTO="off" CARGO_PROFILE_DEV_OPT_LEVEL="0" CARGO_TARGET_DIR="/home/runner/work/ajo-on-near/ajo-on-near/token/target/cargo-near-abi" NEP330_BUILD_INFO_BUILD_COMMAND="[\"cargo\",\"near\",\"build\",\"non-reproducible-wasm\"]" NEP330_BUILD_INFO_OUTPUT_WASM_PATH="/home/runner/work/ajo-on-near/ajo-on-near/token/target/near/ajo_test_token.wasm" NEP330_LINK="https://github.com/HATWHY4041/ajo-on-near" NEP330_VERSION="0.1.0" RUSTFLAGS="-Awarnings" RUSTUP_TOOLCHAIN="stable-x86_64-unknown-linux-gnu" "/home/runner/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo" "build" "--message-format=json-render-diagnostics" "--features" "near-sdk/__abi-generate" "--color" "never"` failed with exit code: Some(101)[0m
-
-Location:
-   [35mcargo-near-build/src/cargo_native/compile.rs[0m:[35m216[0m
