@@ -13,7 +13,7 @@
 //! the testnet experience to one click. None of this is meant for real money.
 
 use near_sdk::json_types::U128;
-use near_sdk::serde::{Deserialize, Serialize};
+use near_sdk::serde::Deserialize;
 use near_sdk::store::LookupMap;
 use near_sdk::{
     env, near, require, AccountId, BorshStorageKey, Gas, GasWeight, NearToken, PanicOnDefault, Promise,
@@ -52,8 +52,7 @@ struct Forward {
     msg: String,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(crate = "near_sdk::serde")]
+#[near(serializers = [json])]
 pub struct StorageBalance {
     pub total: U128,
     pub available: U128,
