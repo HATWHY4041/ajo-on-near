@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CONTRACT_ID, EXPLORER, Circle, Trust, call, connector, explainError, fromYocto, getCircle,
   getCircles, getTrust, periodLabel, shortAccount, timeLeft, times, toYocto,
 } from "./near";
 import { Ring } from "./Ring";
+import { Landing } from "./Landing";
 
 // ---------------------------------------------------------------- hooks
 
@@ -38,9 +39,12 @@ function useRoute() {
   const [hash, setHash] = useState(window.location.hash || "#/");
   useEffect(() => {
     const on = () => {
-      setHash(window.location.hash || "#/");
-      window.scrollTo(0, 0);
+      const h = window.location.hash || "#/";
+      setHash(h);
+      if (h.startsWith("#/")) window.scrollTo(0, 0);
+      else setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ behavior: "smooth" }), 60);
     };
+    if (!(window.location.hash || "#/").startsWith("#/")) on();
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
@@ -84,18 +88,26 @@ export default function App() {
   return (
     <>
       <header className="top">
-        <a className="wordmark" href="#/">ajo<span className="wordmark__on">on NEAR</span></a>
-        <nav className="top__nav">
-          <a href="#/new" className="link">Start a circle</a>
-          {account ? (
-            <span className="who">
-              <span className="who__id" title={account}>{shortAccount(account)}</span>
-              <button className="btn btn--quiet" onClick={signOut}>Disconnect</button>
-            </span>
-          ) : (
-            <button className="btn btn--primary" onClick={signIn}>Connect wallet</button>
-          )}
-        </nav>
+        <div className="top__inner">
+          <a className="wordmark" href="#/">ajo<span className="wordmark__on">on NEAR</span></a>
+          <nav className="top__links" aria-label="Sections">
+            <a href="#how">How it works</a>
+            <a href="#features">Features</a>
+            <a href="#rules">Rules</a>
+            <a href="#circles">Circles</a>
+            <a href="#faq">FAQ</a>
+          </nav>
+          <div className="top__nav">
+            {account ? (
+              <span className="who">
+                <span className="who__id" title={account}>{shortAccount(account)}</span>
+                <button className="btn btn--quiet" onClick={signOut}>Disconnect</button>
+              </span>
+            ) : (
+              <button className="btn btn--primary" onClick={signIn}>Connect wallet</button>
+            )}
+          </div>
+        </div>
       </header>
 
       {notice && (
@@ -109,18 +121,38 @@ export default function App() {
         {route.startsWith("#/new") ? (
           <CreateCircle account={account} signIn={signIn} setNotice={setNotice} onCreated={refresh} />
         ) : circleMatch ? (
-          <CircleDetail id={Number(circleMatch[1])} account={account} signIn={signIn} setNotice={setNotice} onChanged={refresh} />
+          <CircleDetail id={Number(circleMatch[1])} fresh={route.endsWith("/new")} account={account} signIn={signIn} setNotice={setNotice} onChanged={refresh} />
         ) : (
-          <Home circles={circles} loadError={loadError} account={account} />
+          <Landing circles={circles}>
+            <CirclesSection circles={circles} loadError={loadError} account={account} />
+          </Landing>
         )}
       </main>
 
       <footer className="foot">
-        <p>
-          Runs on NEAR testnet with test tokens, so no real money moves. Contract{" "}
-          <a href={`${EXPLORER}/address/${CONTRACT_ID}`} target="_blank" rel="noreferrer">{CONTRACT_ID}</a>.
-          Source on <a href="https://github.com/HATWHY4041/ajo-on-near" target="_blank" rel="noreferrer">GitHub</a>.
-        </p>
+        <div className="foot__inner">
+          <div className="foot__brand">
+            <a className="wordmark" href="#/">ajo<span className="wordmark__on">on NEAR</span></a>
+            <p>Rotating savings circles with a smart contract as the collector. Built for the NEAR Hackathon 2026, Real-World Money track.</p>
+          </div>
+          <div>
+            <h3>Use it</h3>
+            <ul>
+              <li><a href="#/new">Start a circle</a></li>
+              <li><a href="#circles">Join a circle</a></li>
+              <li><a href="#faq">Questions</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3>Check it</h3>
+            <ul>
+              <li><a href={`${EXPLORER}/address/${CONTRACT_ID}`} target="_blank" rel="noreferrer">Contract on NearBlocks</a></li>
+              <li><a href="https://github.com/HATWHY4041/ajo-on-near" target="_blank" rel="noreferrer">Source code</a></li>
+              <li><a href="https://x.com/ayoadhe" target="_blank" rel="noreferrer">@ayoadhe on X</a></li>
+            </ul>
+          </div>
+        </div>
+        <p className="foot__small">Runs on NEAR testnet with test tokens, so no real money moves. Contract {CONTRACT_ID}.</p>
       </footer>
     </>
   );
@@ -128,82 +160,46 @@ export default function App() {
 
 // ---------------------------------------------------------------- home
 
-const EXAMPLE: Circle = {
-  id: -1, name: "Example", creator: "", contribution: toYocto("1"), deposit: toYocto("1"),
-  max_members: 6, period_minutes: 10080, min_trust_score: 0, status: "Active", current_round: 2,
-  round_deadline_ms: 0, pot: "0", history: [], created_at_ms: 0,
-  members: ["amaka", "tunde", "bisi", "kelechi", "funmi", "sade"].map((n, i) => ({
-    account_id: `${n}.testnet`, deposit_left: toYocto("1"), paid_this_round: [0, 1, 3, 4].includes(i),
-    on_time_payments: 0, missed_payments: 0, received_payout: i < 2,
-  })),
-};
-
-function Home({ circles, loadError, account }: { circles: Circle[] | null; loadError: string | null; account: string | null }) {
+function CirclesSection({ circles, loadError, account }: { circles: Circle[] | null; loadError: string | null; account: string | null }) {
   const open = (circles ?? []).filter((c) => c.status === "Open").reverse();
+  const running = (circles ?? []).filter((c) => c.status === "Active").reverse();
   const mine = account ? (circles ?? []).filter((c) => c.members.some((m) => m.account_id === account)).reverse() : [];
-  const featured = useMemo(
-    () => [...(circles ?? [])].reverse().find((c) => c.status === "Active" && c.max_members >= 3) ?? EXAMPLE,
-    [circles],
-  );
 
   return (
-    <>
-      <section className="hero">
-        <div className="hero__text">
-          <h1>Save together. Nobody runs off with the pot.</h1>
-          <p className="lede">
-            Ajo, esusu, susu: the savings circle you already know. Everyone pays in each round and one member
-            takes home the whole pot. Here, a contract on NEAR holds the money instead of a collector, and pays
-            each member in turn.
-          </p>
-          <div className="hero__actions">
-            <a className="btn btn--primary btn--big" href="#/new">Start a circle</a>
-            <a className="btn btn--line btn--big" href="#open">Join an open circle</a>
-          </div>
-        </div>
-        <div className="hero__ring">
-          <Ring circle={featured} />
-          <p className="caption">
-            {featured.id < 0 ? (
-              <>An example: round 3 of 6. Bisi collects this week once everyone has paid.</>
-            ) : (
-              <>Live: <a href={`#/circle/${featured.id}`}>{featured.name}</a>, round {featured.current_round + 1} of {featured.max_members}.</>
-            )}
-          </p>
-        </div>
-      </section>
-
-      <section className="how">
-        <h2>How a circle runs</h2>
-        <ol className="steps">
-          <li><strong>Set it up.</strong> Choose the amount, how often everyone pays, and how many people.</li>
-          <li><strong>Lock a deposit.</strong> Each member locks one payment as a deposit. It covers a missed payment, so the person collecting is never short.</li>
-          <li><strong>Pay each round.</strong> When the last member pays, the pot goes straight to whoever's turn it is.</li>
-          <li><strong>Everyone collects once.</strong> At the end, deposits come back and on-time payers build a trust score for stricter circles.</li>
-        </ol>
-      </section>
+    <section className="section circles" id="circles">
+      <div className="section__head section__head--row">
+        <h2>Circles</h2>
+        <a className="btn btn--primary" href="#/new">Start a circle</a>
+      </div>
 
       {account && (
-        <section className="block">
+        <div className="circles__group">
           <div className="block__head">
-            <h2>Your circles</h2>
+            <h3>Your circles</h3>
             <TrustBadge account={account} />
           </div>
           {mine.length ? <CircleList circles={mine} account={account} /> : (
-            <p className="empty">You aren't in a circle yet. <a href="#/new">Start one</a> or join an open circle below.</p>
+            <p className="empty">You aren't in a circle yet. Start one, or join an open circle below.</p>
           )}
-        </section>
+        </div>
       )}
 
-      <section className="block" id="open">
-        <h2>Open circles</h2>
+      <div className="circles__group">
+        <h3>Taking members now</h3>
         {loadError && <p className="empty">Couldn't load circles from NEAR testnet: {loadError}</p>}
         {!circles && !loadError && <p className="empty">Loading circles…</p>}
         {circles && (open.length ? <CircleList circles={open} account={account} /> : (
-          <p className="empty">No circles are taking members right now. <a href="#/new">Start the first one.</a></p>
+          <p className="empty">No circles are taking members right now. <a href="#/new">Start the first one</a> and share the link with your group.</p>
         ))}
-      </section>
-    </>
+      </div>
+
+      {running.length > 0 && (
+        <div className="circles__group">
+          <h3>Running now</h3>
+          <CircleList circles={running.slice(0, 8)} account={account} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -291,8 +287,8 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
       await onCreated();
       const all = await getCircles();
       const created = [...all].reverse().find((c) => c.creator === account && c.name === name.trim());
-      setNotice({ kind: "ok", text: `Circle created. Share this page so others can join.` });
-      window.location.hash = created ? `#/circle/${created.id}` : "#/";
+      setNotice({ kind: "ok", text: "Circle created. Now invite your members." });
+      window.location.hash = created ? `#/circle/${created.id}/new` : "#/";
     } catch (e) {
       setNotice({ kind: "error", text: explainError(e) });
     } finally {
@@ -302,7 +298,7 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
 
   return (
     <section className="page page--narrow">
-      <a className="back" href="#/">Back to circles</a>
+      <a className="back" href="#circles">Back to circles</a>
       <h1>Start a circle</h1>
       <p className="lede">You'll be the first member. Others join from the circle's page, and it starts once every seat is taken.</p>
       <form className="form" onSubmit={submit}>
@@ -355,8 +351,8 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
 
 // ---------------------------------------------------------------- detail
 
-function CircleDetail({ id, account, signIn, setNotice, onChanged }: {
-  id: number; account: string | null; signIn: () => void; setNotice: (n: Notice) => void; onChanged: () => Promise<void>;
+function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
+  id: number; fresh?: boolean; account: string | null; signIn: () => void; setNotice: (n: Notice) => void; onChanged: () => Promise<void>;
 }) {
   const [c, setC] = useState<Circle | null | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
@@ -370,13 +366,13 @@ function CircleDetail({ id, account, signIn, setNotice, onChanged }: {
   }, [load]);
 
   if (c === undefined) return <section className="page"><p className="empty">Loading circle…</p></section>;
-  if (c === null) return <section className="page"><a className="back" href="#/">Back to circles</a><p className="empty">There's no circle number {id}.</p></section>;
+  if (c === null) return <section className="page"><a className="back" href="#circles">Back to circles</a><p className="empty">There's no circle number {id}.</p></section>;
 
   const me = account ? c.members.findIndex((m) => m.account_id === account) : -1;
   const member = me >= 0 ? c.members[me] : null;
   const recipient = c.status === "Active" ? c.members[c.current_round] : null;
   const late = c.status === "Active" && now > c.round_deadline_ms;
-  const pot = times(c.contribution, c.members.length);
+  const pot = times(c.contribution, c.max_members);
 
   async function act(method: string, deposit: string, done: string) {
     if (!account) return signIn();
@@ -437,11 +433,11 @@ function CircleDetail({ id, account, signIn, setNotice, onChanged }: {
 
   return (
     <section className="page detail">
-      <a className="back" href="#/">Back to circles</a>
+      <a className="back" href="#circles">Back to circles</a>
       <div className="detail__grid">
         <div className="detail__ring">
           <Ring circle={c} me={account} />
-          <Legend />
+          {c.status === "Active" && <Legend />}
         </div>
         <div className="detail__side">
           <h1>{c.name}</h1>
@@ -458,7 +454,13 @@ function CircleDetail({ id, account, signIn, setNotice, onChanged }: {
             </div>
           )}
 
+          {c.status === "Open" && fresh && member && (
+            <p className="state state--ok">Your circle is ready. Send the invite link below to the people you save with.</p>
+          )}
+
           <div className="action">{action}</div>
+
+          {c.status !== "Completed" && <Invite circle={c} highlight={c.status === "Open"} />}
 
           <h2>{c.status === "Open" ? "Members so far" : "Payout order"}</h2>
           <ol className="members">
@@ -510,5 +512,56 @@ function Legend() {
       <li><i className="dot dot--paid" />Paid</li>
       <li><i className="dot dot--waiting" />Not paid yet</li>
     </ul>
+  );
+}
+
+// ---------------------------------------------------------------- invite
+
+function inviteText(c: Circle): string {
+  const seats = c.max_members - c.members.length;
+  return c.status === "Open"
+    ? `Join my ajo "${c.name}" on NEAR: ${fromYocto(c.contribution)} NEAR ${periodLabel(c.period_minutes)}, ${c.max_members} members, ${seats} seat${seats === 1 ? "" : "s"} left. The contract holds the money and pays each of us in turn.`
+    : `Follow our ajo "${c.name}" on NEAR: ${fromYocto(c.contribution)} NEAR ${periodLabel(c.period_minutes)}, round ${c.current_round + 1} of ${c.max_members}.`;
+}
+
+function Invite({ circle, highlight }: { circle: Circle; highlight: boolean }) {
+  const url = `${window.location.origin}/#/circle/${circle.id}`;
+  const text = inviteText(circle);
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      const el = document.getElementById(`invite-${circle.id}`) as HTMLInputElement | null;
+      el?.select();
+      document.execCommand?.("copy");
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  }
+
+  const canShare = typeof navigator !== "undefined" && "share" in navigator;
+
+  return (
+    <div className={`invite${highlight ? " invite--open" : ""}`}>
+      <h2 className="invite__title">{circle.status === "Open" ? "Invite people to join" : "Share this circle"}</h2>
+      <p className="invite__text">
+        {circle.status === "Open"
+          ? `${circle.max_members - circle.members.length} seat${circle.max_members - circle.members.length === 1 ? "" : "s"} left. Anyone with this link can open the circle and join from their NEAR wallet.`
+          : "Members and friends can follow every payment and payout on this page."}
+      </p>
+      <div className="invite__link">
+        <input id={`invite-${circle.id}`} readOnly value={url} aria-label="Invite link" onFocus={(e) => e.currentTarget.select()} />
+        <button className="btn btn--primary" onClick={copy}>{copied ? "Copied" : "Copy link"}</button>
+      </div>
+      <div className="invite__share">
+        <a className="btn btn--line" href={`https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`} target="_blank" rel="noreferrer">Share on WhatsApp</a>
+        <a className="btn btn--line" href={`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`} target="_blank" rel="noreferrer">Post on X</a>
+        {canShare && (
+          <button className="btn btn--line" onClick={() => navigator.share({ title: circle.name, text, url }).catch(() => {})}>More options</button>
+        )}
+      </div>
+    </div>
   );
 }
