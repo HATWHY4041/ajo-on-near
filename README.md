@@ -48,6 +48,12 @@ near view ajo-on-near.testnet get_circle '{"circle_id": 0}'
 ```
 You'll see `"status": "Completed"`, two `history` entries (one payout per member), and every member with `received_payout: true`.
 
+**See a finished stablecoin circle** (circle 2, run by `scripts/smoke-test-v2.js`: created with tUSDC, joined with tUSDT, paid with NEAR):
+```bash
+near view ajo-on-near.testnet get_circle '{"circle_id": 2}'
+```
+You'll see `"token": "usdc.ajo-on-near.testnet"`, `"status": "Completed"` and two payouts of `20000` (0.02 tUSDC).
+
 **Check a trust record**:
 ```bash
 near view ajo-on-near.testnet get_trust '{"account_id": "0e4870a750918e6185879c056350c6d9e21ac3597f6211535e0eb26145098d67"}'
