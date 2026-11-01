@@ -7,7 +7,7 @@
       "compiler": "rustc 1.99.1",
       "builder": "cargo-near cargo-near-build 0.11.5"
     },
-    "wasm_hash": "9jz1a1TSRmixfCyAntMukJvzMkrxxiMn9ujq8ZNLfV8d"
+    "wasm_hash": "DbbPFZKvEXu9HGrSMdP8sEcYSf3Zd6mFmPjEiMQGXAud"
   },
   "body": {
     "functions": [
@@ -351,6 +351,32 @@
             "format": "uint64",
             "minimum": 0.0
           }
+        }
+      },
+      {
+        "name": "pay_for",
+        "doc": " NEAR payment made on a member's behalf by the swap desk\n (`swap.<this account>`), which converted the member's tokens to NEAR.\n `action` is the same JSON as an `ft_on_transfer` msg; the attached NEAR\n is the payment, credited to `member` exactly as if they paid it.",
+        "kind": "call",
+        "modifiers": [
+          "payable"
+        ],
+        "params": {
+          "serialization_type": "json",
+          "args": [
+            {
+              "name": "member",
+              "type_schema": {
+                "description": "NEAR Account Identifier.\n\nThis is a unique, syntactically valid, human-readable account identifier on the NEAR network.\n\n[See the crate-level docs for information about validation.](index.html#account-id-rules)\n\nAlso see [Error kind precedence](AccountId#error-kind-precedence).\n\n## Examples\n\n``` use near_account_id::AccountId;\n\nlet alice: AccountId = \"alice.near\".parse().unwrap();\n\nassert!(\"ƒelicia.near\".parse::<AccountId>().is_err()); // (ƒ is not f) ```",
+                "type": "string"
+              }
+            },
+            {
+              "name": "action",
+              "type_schema": {
+                "type": "string"
+              }
+            }
+          ]
         }
       },
       {
