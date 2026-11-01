@@ -352,7 +352,7 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
         )}
 
         <button className="btn btn--primary btn--big" disabled={busy || (!!account && (!yocto || !name.trim()))}>
-          {!account ? "Connect wallet to continue" : busy ? "Waiting for your wallet…" : `Create circle and lock ${yocto ? fmt(yocto) : ""}`}
+          {!account ? "Connect wallet to continue" : busy ? "Waiting for your wallet…" : `Create circle and lock ${yocto ? fmt(yocto) : ""}${payWith.id ? ` with ${payWith.symbol}` : ""}`}
         </button>
       </form>
       {account && <Wallet account={account} balances={balances} reload={reload} setNotice={setNotice} />}
@@ -388,6 +388,7 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
   const pot = times(c.contribution, c.max_members);
   const fmt = (v: string) => money(v, c.token);
   const using = payWith ?? currencyOf(c.token);
+  const via = using.symbol !== currencyOf(c.token).symbol ? ` with ${using.symbol}` : "";
 
   async function act(method: string, deposit: string, done: string) {
     if (!account) return signIn();
@@ -426,7 +427,7 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
       <>
         {payChoice}
         <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("join_circle", c.deposit, "You joined the circle.")}>
-          {!account ? "Connect wallet to join" : busy ? "Waiting for your wallet…" : `Join and lock ${fmt(c.deposit)} deposit`}
+          {!account ? "Connect wallet to join" : busy ? "Waiting for your wallet…" : `Join and lock ${fmt(c.deposit)} deposit${via}`}
         </button>
       </>
     );
@@ -448,7 +449,7 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
         <>
           {payChoice}
           <button className="btn btn--primary btn--big" disabled={!!busy} onClick={() => act("contribute", c.contribution, "Payment sent. Thank you for paying on time.")}>
-            {busy ? "Waiting for your wallet…" : `Pay ${fmt(c.contribution)} for round ${c.current_round + 1}`}
+            {busy ? "Waiting for your wallet…" : `Pay ${fmt(c.contribution)} for round ${c.current_round + 1}${via}`}
           </button>
         </>
       );
