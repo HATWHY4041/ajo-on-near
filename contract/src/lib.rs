@@ -302,6 +302,26 @@ impl Contract {
         PromiseOrValue::Value(U128(0))
     }
 
+    /// NEAR payment made on a member's behalf by the swap desk
+    /// (`swap.<this account>`), which converted the member's tokens to NEAR.
+    /// `action` is the same JSON as an `ft_on_transfer` msg; the attached NEAR
+    /// is the payment, credited to `member` exactly as if they paid it.
+    #[payable]
+    pub fn pay_for(&mut self, member: AccountId, action: String) {
+        let desk: AccountId = format!("swap.{}", env::current_account_id()).parse().unwrap();
+        require!(env::predecessor_account_id() == desk, "Only the swap desk can pay on a member's behalf");
+        let paid = env::attached_deposit().as_yoctonear();
+        let action: FtAction = near_sdk::serde_json::from_str(&action)
+            .unwrap_or_else(|_| env::panic_str("Invalid action"));
+        match action {
+            FtAction::Create { name, max_members, period_minutes, min_trust_score } => {
+                self.internal_create(member, paid, None, name, U128(paid), max_members, period_minutes, min_trust_score);
+            }
+            FtAction::Join { circle_id } => self.internal_join(member, paid, None, circle_id),
+            FtAction::Contribute { circle_id } => self.internal_contribute(member, paid, None, circle_id),
+        }
+    }
+
     // ---------------------------------------------------------------- calls
 
     /// Open a new circle. Attach exactly one `contribution` as your deposit;

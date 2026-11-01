@@ -381,3 +381,50 @@ fn migrate_keeps_old_circles() {
     c.join_circle(0);
     assert_eq!(c.get_circle(0).unwrap().members.len(), 2);
 }
+
+// ------------------------------------------------------------ paid through the swap desk
+
+fn desk_ctx(attached: u128, t: u64) {
+    let mut b = VMContextBuilder::new();
+    b.predecessor_account_id("swap.ajo.testnet".parse().unwrap())
+        .current_account_id("ajo.testnet".parse().unwrap())
+        .attached_deposit(NearToken::from_yoctonear(attached))
+        .block_timestamp(t);
+    testing_env!(b.build());
+}
+
+#[test]
+fn swap_desk_pays_for_member() {
+    let (mut c, id) = full_circle();
+    let members: Vec<String> = c.get_circle(id).unwrap().members.iter().map(|m| m.account_id.to_string()).collect();
+    for (k, m) in members.iter().enumerate() {
+        desk_ctx(ONE, 10 + k as u64);
+        c.pay_for(m.parse().unwrap(), format!(r#"{{"action":"contribute","circle_id":{}}}"#, id));
+    }
+    let circle = c.get_circle(id).unwrap();
+    assert_eq!(circle.history.len(), 1);
+    assert_eq!(circle.history[0].amount.0, 3 * ONE);
+    assert!(circle.members.iter().all(|m| m.on_time_payments == 1));
+}
+
+#[test]
+fn swap_desk_can_create_and_join() {
+    ctx("ajo", 0, 0);
+    let mut c = Contract::new();
+    desk_ctx(ONE, 1);
+    c.pay_for(acc("ada"), r#"{"action":"create","name":"Desk circle","max_members":2,"period_minutes":60}"#.into());
+    desk_ctx(ONE, 2);
+    c.pay_for(acc("bayo"), r#"{"action":"join","circle_id":0}"#.into());
+    let circle = c.get_circle(0).unwrap();
+    assert_eq!(circle.creator, acc("ada"));
+    assert!(circle.token.is_none());
+    assert_eq!(circle.status, CircleStatus::Active);
+}
+
+#[test]
+#[should_panic(expected = "Only the swap desk")]
+fn only_swap_desk_can_pay_for() {
+    let (mut c, id) = full_circle();
+    ctx("mallory", ONE, 10);
+    c.pay_for(acc("ada"), format!(r#"{{"action":"contribute","circle_id":{}}}"#, id));
+}

@@ -1,0 +1,24 @@
+[package]
+name = "ajo-swap-desk"
+version = "0.1.0"
+edition = "2021"
+description = "Swap desk for Ajo on NEAR testnet: converts USDC, USDT and wNEAR to NEAR at fixed test rates and pays a circle for the member"
+license = "MIT"
+repository = "https://github.com/HATWHY4041/ajo-on-near"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5.30.0"
+
+[dev-dependencies]
+near-sdk = { version = "5.30.0", features = ["unit-testing"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
