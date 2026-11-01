@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CURRENCIES, Circle, Currency, NEAR, TEST_RATE, Trust, balanceOf, costIn, currencyOf, explainError, faucet,
-  fromUnits, getTrust, money, periodLabel, shortAccount, timeLeft, times,
+  CURRENCIES, Circle, Currency, NEAR, PAY_OPTIONS, TEST_RATE, TUSDC, TUSDT, Trust, USDC, WNEAR, balanceOf, costIn, currencyOf,
+  explainError, faucet, fromUnits, getTrust, money, periodLabel, shortAccount, timeLeft, times, wrapNear,
 } from "./near";
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
 // ---------------------------------------------------------------- balances
 
+const BALANCE_LIST = [NEAR, USDC, TUSDT, WNEAR, TUSDC];
+
 export function useBalances(account: string | null) {
   const [balances, setBalances] = useState<Record<string, string>>({});
   const load = useCallback(async () => {
     if (!account) return setBalances({});
     const entries = await Promise.all(
-      CURRENCIES.map(async (c) => [c.symbol, await balanceOf(c, account).catch(() => "0")] as const),
+      BALANCE_LIST.map(async (c) => [c.symbol, await balanceOf(c, account).catch(() => "0")] as const),
     );
     setBalances(Object.fromEntries(entries));
   }, [account]);
@@ -25,41 +27,50 @@ export function useBalances(account: string | null) {
   return { balances, reload: load };
 }
 
-/** Test-token balances with one-click faucet buttons. */
+/** Testnet balances of everything you can pay with, and where to get more. */
 export function Wallet({ account, balances, reload, setNotice }: {
   account: string; balances: Record<string, string>; reload: () => Promise<void>; setNotice: (n: Notice) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  async function get(cur: Currency) {
-    setBusy(cur.symbol);
+  async function run(sym: string, fn: () => Promise<unknown>, done: string) {
+    setBusy(sym);
     try {
-      await faucet(cur.id!);
+      await fn();
       await reload();
-      setNotice({ kind: "ok", text: `100 ${cur.symbol} added to ${shortAccount(account)}.` });
+      setNotice({ kind: "ok", text: done });
     } catch (e) {
       setNotice({ kind: "error", text: explainError(e) });
     } finally {
       setBusy(null);
     }
   }
+  const action = (cur: Currency) => {
+    if (cur === NEAR) return <a className="btn btn--line btn--small" href="https://near-faucet.io/" target="_blank" rel="noreferrer">NEAR faucet</a>;
+    if (cur === USDC) return <a className="btn btn--line btn--small" href="https://faucet.circle.com/" target="_blank" rel="noreferrer" title="Pick Near Testnet and paste your account">Get 20 USDC</a>;
+    if (cur === WNEAR) return (
+      <button className="btn btn--line btn--small" disabled={!!busy} onClick={() => run(cur.symbol, wrapNear, "Wrapped 1 NEAR into wNEAR.")}>
+        {busy === cur.symbol ? "Waiting…" : "Wrap 1 NEAR"}
+      </button>
+    );
+    return (
+      <button className="btn btn--line btn--small" disabled={!!busy} onClick={() => run(cur.symbol, () => faucet(cur.id!), `100 ${cur.symbol} added to ${shortAccount(account)}.`)}>
+        {busy === cur.symbol ? "Waiting…" : `Get 100 ${cur.symbol}`}
+      </button>
+    );
+  };
+  const shown = PAY_OPTIONS.concat(balances.tUSDC && balances.tUSDC !== "0" ? [TUSDC] : []);
   return (
-    <div className="wallet" aria-label="Your test balances">
+    <div className="wallet" aria-label="Your testnet balances">
       <div className="wallet__head">
-        <h2>Your test balances</h2>
+        <h2>Your testnet balances</h2>
         <span className="wallet__note">Testnet only, no real value</span>
       </div>
       <ul className="wallet__list">
-        {CURRENCIES.map((cur) => (
+        {shown.map((cur) => (
           <li key={cur.symbol}>
             <span className="wallet__amt">{balances[cur.symbol] !== undefined ? fromUnits(balances[cur.symbol], cur.decimals, 2) : "…"}</span>
             <span className="wallet__sym">{cur.symbol}</span>
-            {cur.id ? (
-              <button className="btn btn--line btn--small" disabled={!!busy} onClick={() => get(cur)}>
-                {busy === cur.symbol ? "Waiting…" : `Get 100 ${cur.symbol}`}
-              </button>
-            ) : (
-              <a className="btn btn--line btn--small" href="https://near-faucet.io/" target="_blank" rel="noreferrer">NEAR faucet</a>
-            )}
+            {action(cur)}
           </li>
         ))}
       </ul>
@@ -69,25 +80,35 @@ export function Wallet({ account, balances, reload, setNotice }: {
 
 // ---------------------------------------------------------------- pay with
 
-/** Choose which currency to pay a stablecoin circle with. */
+function rateNote(cur: Currency) {
+  if (cur === WNEAR) return "Unwrapped 1:1 to NEAR";
+  return `Converted to NEAR at 1 NEAR = ${TEST_RATE} ${cur.symbol}`;
+}
+
+/** Choose what to pay a circle with. NEAR circles take NEAR or any listed token, converted to NEAR on the way. */
 export function PayWith({ token, amount, value, onChange, balances }: {
   token: string | null; amount: string; value: Currency; onChange: (c: Currency) => void; balances: Record<string, string>;
 }) {
-  const [nearCost, setNearCost] = useState<string | null>(null);
-  useEffect(() => {
-    if (!token) return;
-    costIn(token, NEAR, amount).then(setNearCost).catch(() => setNearCost(null));
-  }, [token, amount]);
-  if (!token) return null;
   const circleCur = currencyOf(token);
-  const options = [circleCur, ...CURRENCIES.filter((c) => c.symbol !== circleCur.symbol)];
+  const options = token ? [circleCur, ...CURRENCIES.filter((c) => c.symbol !== circleCur.symbol)] : PAY_OPTIONS;
+  const [costs, setCosts] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let live = true;
+    Promise.all(options.map(async (c) => [c.symbol, await costIn(token, c, amount).catch(() => "")] as const))
+      .then((e) => live && setCosts(Object.fromEntries(e)));
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, amount]);
   return (
     <fieldset className="paywith">
       <legend>Pay with</legend>
-      <div className="paywith__opts">
+      <div className={`paywith__opts${options.length > 3 ? " paywith__opts--4" : ""}`}>
         {options.map((cur) => {
-          const cost = cur.id === token ? money(amount, token) : cur.id ? `${fromUnits(amount, cur.decimals)} ${cur.symbol}` : nearCost ? `${fromUnits(nearCost, 24, 3)} NEAR` : "…";
-          const note = cur.id === token ? "Direct" : cur.id ? "Swapped 1:1" : `At test rate 1 NEAR = ${TEST_RATE} ${circleCur.symbol}`;
+          const c = costs[cur.symbol];
+          const cost = c ? `${fromUnits(c, cur.decimals, cur.decimals > 6 ? 4 : 2)} ${cur.symbol}` : "…";
+          const note = token
+            ? (cur.id === token ? "Direct" : cur.id ? "Swapped 1:1" : `At test rate 1 NEAR = ${TEST_RATE} ${circleCur.symbol}`)
+            : (cur.id ? rateNote(cur) : "Direct");
           const bal = balances[cur.symbol];
           return (
             <label key={cur.symbol} className={`paywith__opt${value.symbol === cur.symbol ? " is-on" : ""}`}>
@@ -134,7 +155,7 @@ function answer(q: string, c: Circle, account: string | null, now: number, trust
     return `You collect in round ${me + 1} of ${n}, which is ${me - c.current_round} round${me - c.current_round === 1 ? "" : "s"} from now. You'll get ${pot}.`;
   }
   if (/how much|amount|pay\b|cost|contribut|deposit/.test(t)) {
-    return `Every member pays ${each} ${periodLabel(c.period_minutes)}, and locked ${money(c.deposit, c.token)} as a deposit when they joined. Each round, one member collects ${pot}.${c.token ? " You can pay with tUSDC, tUSDT or NEAR; the site converts it at the test rate in the same transaction." : ""}`;
+    return `Every member pays ${each} ${periodLabel(c.period_minutes)}, and locked ${money(c.deposit, c.token)} as a deposit when they joined. Each round, one member collects ${pot}.${c.token ? " You can pay with tUSDC, tUSDT or NEAR; the site converts it at the test rate in the same transaction." : " You can pay with NEAR, or with USDC, USDT or wNEAR: it's converted to NEAR in the same transaction, so you sign once."}`;
   }
   if (/who|hasn|not paid|unpaid|owe|late/.test(t)) {
     if (c.status !== "Active") return c.status === "Open" ? "Nobody pays yet. Payments start when the circle is full." : "Everyone is settled. The circle is complete.";

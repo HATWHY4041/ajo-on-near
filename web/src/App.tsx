@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  CONTRACT_ID, CURRENCIES, Circle, Currency, EXPLORER, NEAR, TUSDC, Trust, call, connector, currencyOf, explainError,
+  CONTRACT_ID, Circle, Currency, EXPLORER, NEAR, Trust, call, connector, currencyOf, explainError,
   getCircle, getCircles, getTrust, money, payIn, periodLabel, shortAccount, timeLeft, times, toUnits,
 } from "./near";
 import { Ring } from "./Ring";
@@ -94,7 +94,7 @@ export default function App() {
           <nav className="top__links" aria-label="Sections">
             <a href="#how">How it works</a>
             <a href="#features">Features</a>
-            <a href="#stablecoins">Stablecoins</a>
+            <a href="#stablecoins">Pay with any token</a>
             <a href="#rules">Rules</a>
             <a href="#circles">Circles</a>
             <a href="#faq">FAQ</a>
@@ -154,7 +154,7 @@ export default function App() {
             </ul>
           </div>
         </div>
-        <p className="foot__small">Runs on NEAR testnet with test tokens (test NEAR, tUSDC and tUSDT), so no real money moves. Contract {CONTRACT_ID}.</p>
+        <p className="foot__small">Runs on NEAR testnet with test tokens (test NEAR, testnet USDC, tUSDT and wNEAR), so no real money moves. Contract {CONTRACT_ID}.</p>
       </footer>
     </>
   );
@@ -261,9 +261,9 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
   account: string | null; signIn: () => void; setNotice: (n: Notice) => void; onCreated: () => Promise<void>;
 }) {
   const [name, setName] = useState("");
-  const [cur, setCur] = useState<Currency>(TUSDC);
-  const [payWith, setPayWith] = useState<Currency>(TUSDC);
-  const [amount, setAmount] = useState("10");
+  const cur = NEAR; // circles save in NEAR; members can pay with other tokens, converted to NEAR
+  const [payWith, setPayWith] = useState<Currency>(NEAR);
+  const [amount, setAmount] = useState("0.5");
   const { balances, reload } = useBalances(account);
   const [members, setMembers] = useState(5);
   const [period, setPeriod] = useState(10080);
@@ -278,12 +278,6 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
   } catch (e) { amountError = (e as Error).message; }
   const fmt = (v: string) => money(v, cur.id);
 
-  function pickCurrency(c: Currency) {
-    setCur(c);
-    setPayWith(c);
-    setAmount(c.id ? "10" : "0.5");
-  }
-
   const periodText = PERIODS.find((p) => p.minutes === period)?.label.toLowerCase().replace(/ \(.*\)/, "") ?? periodLabel(period);
 
   async function submit(ev: React.FormEvent) {
@@ -292,7 +286,7 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
     if (!yocto || !name.trim()) return;
     setBusy(true);
     try {
-      await payIn(cur.id, cur.id ? payWith : NEAR, yocto, {
+      await payIn(null, payWith, yocto, {
         action: "create", name: name.trim(), max_members: members, period_minutes: period, min_trust_score: minTrust || null,
       });
       await onCreated();
@@ -318,18 +312,6 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
           <span>Circle name</span>
           <input value={name} maxLength={64} required placeholder="Ikeja traders" onChange={(e) => setName(e.target.value)} />
         </label>
-        <fieldset className="currency">
-          <legend>Save in</legend>
-          <div className="currency__opts">
-            {CURRENCIES.map((c) => (
-              <label key={c.symbol} className={`currency__opt${cur.symbol === c.symbol ? " is-on" : ""}`}>
-                <input type="radio" name="currency" checked={cur.symbol === c.symbol} onChange={() => pickCurrency(c)} />
-                <strong>{c.symbol}</strong>
-                <span>{c.id ? `${c.name}, a dollar test stablecoin` : "Native NEAR"}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
         <label>
           <span>Each payment, in {cur.symbol}</span>
           <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={!!amountError} />
@@ -365,8 +347,8 @@ function CreateCircle({ account, signIn, setNotice, onCreated }: {
           </p>
         )}
 
-        {account && yocto && cur.id && (
-          <PayWith token={cur.id} amount={yocto} value={payWith} onChange={setPayWith} balances={balances} />
+        {account && yocto && (
+          <PayWith token={null} amount={yocto} value={payWith} onChange={setPayWith} balances={balances} />
         )}
 
         <button className="btn btn--primary btn--big" disabled={busy || (!!account && (!yocto || !name.trim()))}>
@@ -427,8 +409,8 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
     }
   }
 
-  const payChoice = account && c.token ? (
-    <PayWith token={c.token} amount={c.status === "Open" ? c.deposit : c.contribution} value={using} onChange={setPayWith} balances={balances} />
+  const payChoice = account ? (
+    <PayWith token={c.token ?? null} amount={c.status === "Open" ? c.deposit : c.contribution} value={using} onChange={setPayWith} balances={balances} />
   ) : null;
 
   let action: React.ReactNode = null;
@@ -509,7 +491,7 @@ function CircleDetail({ id, fresh, account, signIn, setNotice, onChanged }: {
 
           <div className="action">{action}</div>
 
-          {account && member && c.status !== "Completed" && c.token && (
+          {account && member && c.status !== "Completed" && (
             <Wallet account={account} balances={balances} reload={reload} setNotice={setNotice} />
           )}
 

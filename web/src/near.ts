@@ -17,15 +17,27 @@ export interface Currency {
 export const USDC_ID = import.meta.env.VITE_USDC_ID || "usdc.ajo-on-near.testnet";
 export const USDT_ID = import.meta.env.VITE_USDT_ID || "usdt.ajo-on-near.testnet";
 
+/** Circle's own USDC on NEAR testnet (the same issuer as mainnet USDC). */
+export const CIRCLE_USDC_ID = import.meta.env.VITE_CIRCLE_USDC_ID || "3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af";
+export const WRAP_ID = import.meta.env.VITE_WRAP_ID || "wrap.testnet";
+/** Converts other NEAR tokens to NEAR for circles, at fixed test rates. */
+export const SWAP_ID = import.meta.env.VITE_SWAP_ID || "swap.ajo-on-near.testnet";
+
 export const NEAR: Currency = { id: null, symbol: "NEAR", name: "NEAR", decimals: 24 };
-export const TUSDC: Currency = { id: USDC_ID, symbol: "tUSDC", name: "Test USDC", decimals: 6 };
+export const USDC: Currency = { id: CIRCLE_USDC_ID, symbol: "USDC", name: "USDC by Circle", decimals: 6 };
 export const TUSDT: Currency = { id: USDT_ID, symbol: "tUSDT", name: "Test USDT", decimals: 6 };
+export const WNEAR: Currency = { id: WRAP_ID, symbol: "wNEAR", name: "Wrapped NEAR", decimals: 24 };
+export const TUSDC: Currency = { id: USDC_ID, symbol: "tUSDC", name: "Test USDC", decimals: 6 };
+/** What a member can pay a circle with; anything other than NEAR is converted to NEAR. */
+export const PAY_OPTIONS = [NEAR, USDC, TUSDT, WNEAR];
+const ALL = [NEAR, USDC, TUSDT, WNEAR, TUSDC];
+/** Kept for older dollar circles. */
 export const CURRENCIES = [TUSDC, TUSDT, NEAR];
-/** Fixed test rate used by the test tokens: 1 NEAR buys this many tUSDC or tUSDT. */
+/** Fixed test rate: 1 NEAR = this many dollars (USDC, tUSDT, tUSDC). */
 export const TEST_RATE = 2.5;
 
 export function currencyOf(token: string | null | undefined): Currency {
-  return CURRENCIES.find((c) => c.id === (token ?? null)) ?? { id: token ?? null, symbol: token ?? "NEAR", name: token ?? "NEAR", decimals: 24 };
+  return ALL.find((c) => c.id === (token ?? null)) ?? { id: token ?? null, symbol: token ?? "NEAR", name: token ?? "NEAR", decimals: 24 };
 }
 
 /** Amount in a circle's currency, e.g. "10 tUSDC". */
@@ -148,10 +160,15 @@ const GAS = "100000000000000"; // 100 Tgas
 const GAS_MAX = "300000000000000"; // 300 Tgas, for token payments that may pay out the pot
 
 export async function call(methodName: string, args: object, deposit = "0", receiverId = CONTRACT_ID, gas = GAS) {
+  return callMany(receiverId, [{ methodName, args, deposit, gas }]);
+}
+
+/** Several function calls to one contract, signed once. */
+export async function callMany(receiverId: string, calls: { methodName: string; args: object; deposit: string; gas?: string }[]) {
   const wallet = await connector.wallet();
   const outcome = await wallet.signAndSendTransaction({
     receiverId,
-    actions: [{ type: "FunctionCall", params: { methodName, args, gas, deposit } }],
+    actions: calls.map(({ methodName, args, deposit, gas = GAS }) => ({ type: "FunctionCall" as const, params: { methodName, args, gas, deposit } })),
   });
   // A token payment the circle refuses still "succeeds" as a transaction (the
   // tokens are refunded), so look for the circle's reason in the receipts.
@@ -175,7 +192,13 @@ const NEAR_METHOD = { join: "join_circle", contribute: "contribute" } as const;
  */
 export async function payIn(circleToken: string | null, payWith: Currency, amount: string, act: FtAction) {
   if (!circleToken) {
-    if (payWith.id) throw new Error("This circle runs in NEAR, so pay with NEAR.");
+    if (payWith.id) {
+      // Another NEAR token: the swap desk converts it to exactly `amount` NEAR and pays the circle for you.
+      const tokens = await viewOn<string>(SWAP_ID, "quote", { token: payWith.id, near_amount: amount });
+      return call("ft_transfer_call", {
+        receiver_id: SWAP_ID, amount: tokens, msg: JSON.stringify({ near_amount: amount, action: act }),
+      }, "1", payWith.id, GAS_MAX);
+    }
     if (act.action === "create") {
       const { action: _a, ...rest } = act;
       return call("create_circle", { ...rest, contribution: amount }, amount);
@@ -198,11 +221,18 @@ export async function payIn(circleToken: string | null, payWith: Currency, amoun
 
 /** What paying `amount` of a circle's token costs in another currency. */
 export async function costIn(circleToken: string | null, payWith: Currency, amount: string): Promise<string> {
-  if (!circleToken || payWith.id) return amount;
+  if (!circleToken) return payWith.id ? viewOn<string>(SWAP_ID, "quote", { token: payWith.id, near_amount: amount }) : amount;
+  if (payWith.id) return amount;
   return viewOn<string>(circleToken, "near_for", { amount });
 }
 
 export const faucet = (token: string) => call("faucet", {}, "0", token, "30000000000000");
+
+/** Wrap 1 NEAR into wNEAR (registers the account with wrap.testnet first). */
+export const wrapNear = () => callMany(WRAP_ID, [
+  { methodName: "storage_deposit", args: { registration_only: true }, deposit: "1250000000000000000000", gas: "30000000000000" },
+  { methodName: "near_deposit", args: {}, deposit: "1000000000000000000000000", gas: "30000000000000" },
+]);
 
 // ---------------------------------------------------------------- units
 

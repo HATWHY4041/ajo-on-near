@@ -390,6 +390,7 @@ h3 { font: 700 var(--step-1)/1.2 var(--display); margin: 0 0 0.6rem; letter-spac
 .currency__opt:has(input:focus-visible), .paywith__opt:has(input:focus-visible) { outline: 3px solid var(--gold); outline-offset: 2px; }
 .paywith { margin: 0 0 1rem; }
 .paywith__opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.paywith__opts--4 { grid-template-columns: repeat(4, 1fr); }
 .paywith__sym { font: 700 var(--step-0)/1.1 var(--display); }
 .paywith__cost { font-weight: 700; }
 .paywith__note { color: var(--muted); font-size: 0.8rem; line-height: 1.3; }
@@ -434,6 +435,6 @@ h3 { font: 700 var(--step-1)/1.2 var(--display); margin: 0 0 0.6rem; letter-spac
 .remind__btns .btn { padding: 0.5rem 0.95rem; font-size: var(--step--1); }
 
 @media (max-width: 760px) {
-  .currency__opts, .paywith__opts { grid-template-columns: 1fr; }
+  .currency__opts, .paywith__opts, .paywith__opts--4 { grid-template-columns: 1fr 1fr; }
   .stable__flow { grid-template-columns: 1fr; }
 }
